@@ -381,7 +381,7 @@ void AvvtnCapture::handleAudioWake(avvtn_callback_data_t *data_p)
         ROSManager::getInstance().publishChatHistoryNoStream(wake_up.dump());
 
         // 唤醒直接播放唤醒音频，优化用户体验
-        system("aplay -r 16000 -f S16_LE -c 1 /home/cat/robot_avvtn/bin/wake_up_x5_lingxiaoyue_flow.pcm > /dev/null 2>&1 &");
+        system("aplay -r 16000 -f S16_LE -c 1 /home/nvidia/cmcc_voice_bot/bin/wake_up_x5_lingxiaoyue_flow.pcm > /dev/null 2>&1 &");
 
         /*发送ROS2话题robot_avvtn_chat_history  答*/
         nlohmann::json answer = {
