@@ -1,0 +1,25 @@
+#ifndef ROS2_SUBSCRIBER_CALLBACKS_HPP
+#define ROS2_SUBSCRIBER_CALLBACKS_HPP
+
+#include <std_msgs/msg/string.hpp>
+
+/**
+ * @file ros2_subscriber_callbacks.hpp
+ * @brief ROS2 话题订阅回调函数声明
+ *
+ * 本文件集中定义所有订阅 ROS2 话题时的回调函数。
+ * 在 main.cpp 或其它模块中通过 ROSManager::subscribeTopic(topic_name, CallbackName) 注册使用。
+ */
+
+/**
+ * @brief 唤醒结果话题回调
+ * @param msg 话题消息
+ * @note 话题名: wake_up_turn_result
+ */
+void WakeUpResultCallback(const std_msgs::msg::String::SharedPtr msg);
+
+// 在此处添加更多订阅回调的声明，例如：
+// void onCommand(const std_msgs::msg::String::SharedPtr msg);
+// void onConfigUpdate(const std_msgs::msg::String::SharedPtr msg);
+
+#endif // ROS2_SUBSCRIBER_CALLBACKS_HPP
