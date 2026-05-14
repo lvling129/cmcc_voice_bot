@@ -43,3 +43,15 @@
 # Runtime-generated license files
 /license/avvtn_license
 /license/b3af098acf55de4ddc7a1220817d7c0cdbb1fd90
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+
+# macOS metadata
+__MACOSX/
+.DS_Store
+._*
