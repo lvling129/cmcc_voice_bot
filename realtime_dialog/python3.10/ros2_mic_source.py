@@ -138,21 +138,36 @@ class Ros2MicSource:
     # -- 异步读（asyncio 友好） ---------------------------------------------
 
     async def read(self, chunk_size: int, poll_interval: float = 0.01) -> bytes:
-        """异步等待 chunk_size 字节就绪。每 poll_interval 秒探查一次缓冲，
-        让出事件循环，避免阻塞 asyncio 任务。
+        """异步等待 chunk_size 字节就绪；若一帧时长内仍不足，用静音填充返回。
+
+        豆包云端 ASR 有 AudioASRIdleTimeoutError(52000009)：客户端长时间不送
+        任何字节就会主动断开。pyaudio 直采本来就持续给云端送麦克风采样
+        （静音段也是有效字节），但 ROS2 模式下 AVVTN VAD 过滤了静音，
+        间隙完全断流会触发云端 idle 超时。
+
+        这里的策略：每帧最多等 chunk_duration（chunk_size 对应的真实时长），
+        超时就立即返回 chunk_size 字节的静音；有真实数据时优先返回真实数据。
+        既保证云端持续有数据消费，又不污染语音段。
         """
+        # 16k mono S16LE：每字节 1/(16000*2) 秒
+        chunk_duration = chunk_size / (16000 * 2)
+        deadline = time.monotonic() + chunk_duration
+
         while self._running:
             with self._lock:
                 if len(self._buffer) >= chunk_size:
                     data = bytes(self._buffer[:chunk_size])
                     del self._buffer[:chunk_size]
                     return data
+
+            # 超过一帧时长仍不足 → 用静音填充返回，避免云端 idle 超时
+            if time.monotonic() >= deadline:
+                return b"\x00" * chunk_size
+
             await asyncio.sleep(poll_interval)
-        # 已停止：尽力返回剩余
-        with self._lock:
-            data = bytes(self._buffer[:chunk_size])
-            del self._buffer[:min(chunk_size, len(self._buffer))]
-            return data
+
+        # 已停止：返回一帧静音，让上层循环自然退出
+        return b"\x00" * chunk_size
 
     # -- 上下文管理 ---------------------------------------------------------
 
