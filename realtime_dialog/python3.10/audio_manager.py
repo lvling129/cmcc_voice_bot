@@ -73,10 +73,12 @@ class DialogSession:
     mod: str
 
     def __init__(self, ws_config: Dict[str, Any], output_audio_format: str = "pcm", audio_file_path: str = "",
-                 mod: str = "audio", recv_timeout: int = 10):
+                 mod: str = "audio", recv_timeout: int = 10, mic_source: str = "pyaudio"):
         self.audio_file_path = audio_file_path
         self.recv_timeout = recv_timeout
         self.is_audio_file_input = self.audio_file_path != ""
+        self.mic_source = mic_source  # "pyaudio" 或 "ros2"
+        self._ros2_mic = None  # 延迟创建，避免未使用 ros2 时 import 失败
         if self.is_audio_file_input:
             mod = 'audio_file'
         else:
@@ -130,9 +132,14 @@ class DialogSession:
     def handle_server_response(self, response: Dict[str, Any]) -> None:
         if response == {}:
             return
+        # 健壮性：偶发 server 会下发不带 message_type 的 dict（比如某些心跳/控制帧），
+        # 之前会拋 KeyError 并在上层被捕获后关闭 WebSocket，导致一轮对话之后连接被断。
+        # 这里跳过未知帧，避免引起全局中断。
+        if 'message_type' not in response:
+            return
         """处理服务器响应"""
         if response['message_type'] == 'SERVER_ACK' and isinstance(response.get('payload_msg'), bytes):
-            # print(f"\n接收到音频数据: {len(response['payload_msg'])} 字节")
+            # print(f"[audio] SERVER_ACK 音频帧: {len(response['payload_msg'])}B")
             if self.is_sending_chat_tts_text:
                 return
             audio_data = response['payload_msg']
@@ -317,6 +324,27 @@ class DialogSession:
         await self.client.chat_text_query("你好，我也叫豆包")
 
         """处理麦克风输入"""
+        chunk_size_bytes = config.input_audio_config["chunk"] * 2  # paInt16 = 2 bytes/sample
+        if self.mic_source == "ros2":
+            # 从 C++ AVVTN 发布的 /avvtn/mic_pcm 订阅 AEC 后的干净 PCM
+            from ros2_mic_source import Ros2MicSource
+            self._ros2_mic = Ros2MicSource()
+            self._ros2_mic.start()
+            print("[豆包] mic-source=ros2，等待 /avvtn/mic_pcm 数据...")
+            while self.is_recording:
+                try:
+                    audio_data = await self._ros2_mic.read(chunk_size_bytes)
+                    if not audio_data:
+                        await asyncio.sleep(0.05)
+                        continue
+                    save_input_pcm_to_wav(audio_data, "input.pcm")
+                    await self.client.task_request(audio_data)
+                except Exception as e:
+                    print(f"从 ROS2 读取 PCM 出错: {e}")
+                    await asyncio.sleep(0.1)
+            return
+
+        # 默认 pyaudio 路径
         stream = self.audio_device.open_input_stream()
         print("已打开麦克风，请讲话...")
 
@@ -364,6 +392,8 @@ class DialogSession:
         finally:
             if not self.is_audio_file_input:
                 self.audio_device.cleanup()
+            if self._ros2_mic is not None:
+                self._ros2_mic.stop()
 
 
 def save_input_pcm_to_wav(pcm_data: bytes, filename: str) -> None:

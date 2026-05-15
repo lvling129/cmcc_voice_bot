@@ -8,6 +8,7 @@
 #include <string>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/u_int8_multi_array.hpp>
 
 class ROSManager {
 public:
@@ -34,6 +35,10 @@ public:
 
     // 发布带角度的唤醒消息给PC2做转向动作
     void publishWakeupDetail(const std::string& chat_msg);
+
+    // 发布 AVVTN AEC 后的麦克风 PCM（供豆包 Python 订阅）
+    // 格式: 16k mono S16LE, BEST_EFFORT QoS, topic=/avvtn/mic_pcm
+    void publishMicPcm(const uint8_t* data, size_t len);
     
     // 订阅话题
     void subscribeTopic(const std::string& topic_name, 
@@ -60,6 +65,7 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr chat_history_nostream_publisher_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr wakeup_detail_publisher_;
+    rclcpp::Publisher<std_msgs::msg::UInt8MultiArray>::SharedPtr mic_pcm_publisher_;
 
     // 保存订阅者
     std::unordered_map<std::string, rclcpp::Subscription<std_msgs::msg::String>::SharedPtr> subscribers_;

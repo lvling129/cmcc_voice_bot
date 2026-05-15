@@ -21,7 +21,7 @@ prepare_env() {
     fi
 
     # 与 service 配置保持一致，显式设置 ROS_DOMAIN_ID
-    export ROS_DOMAIN_ID=50
+    export ROS_DOMAIN_ID=0
 }
 
 stop_existing_instance() {

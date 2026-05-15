@@ -15,8 +15,8 @@ with open(_SYSTEM_PROMPT_FILE, "r", encoding="utf-8") as _f:
 ws_connect_config = {
     "base_url": "wss://openspeech.bytedance.com/api/v3/realtime/dialogue",
     "headers": {
-        "X-Api-App-ID": "7930379555",
-        "X-Api-Access-Key": "3g8sT3TPL-Zz0o9ixbaNmOU74RVA-3rn",
+        "X-Api-App-ID": "5244401887",
+        "X-Api-Access-Key": "1cuNco4HeJZVsl-IoBQn9r5ZjUs8ouxj",
         "X-Api-Resource-Id": "volc.speech.dialog",  # 固定值
         "X-Api-App-Key": "PlgvMymc7f3tQnJ6",  # 固定值
         "X-Api-Connect-Id": str(uuid.uuid4()),

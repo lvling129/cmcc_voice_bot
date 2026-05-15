@@ -11,7 +11,7 @@
 # 环境变量（可覆盖默认值）:
 #   ROS_SETUP        - ROS2 setup.bash 路径，默认 /opt/ros/humble/setup.bash
 #   VENV_DIR         - venv 目录，默认 ../.venv310（相对脚本目录）
-#   ROS_DOMAIN_ID    - ROS2 域 ID，默认 50（与 bin/start.sh 保持一致）
+#   ROS_DOMAIN_ID    - ROS2 域 ID，默认 0（与 bin/start.sh 保持一致）
 #   SYSTEM_PROMPT_FILE - system_role 加载路径，默认 prompts/cmcc_lingxi.md
 #
 # 可被 bin/start.sh 或 systemd ExecStart 直接调用
@@ -26,7 +26,7 @@ cd "$SCRIPT_DIR"
 # ---- 2. 配置（可被环境变量覆盖） -------------------------------------------
 ROS_SETUP="${ROS_SETUP:-/opt/ros/humble/setup.bash}"
 VENV_DIR="${VENV_DIR:-${SCRIPT_DIR}/../.venv310}"
-export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-50}"
+export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
 
 # ---- 3. 前置检查 ------------------------------------------------------------
 if [ ! -f "${ROS_SETUP}" ]; then
