@@ -1,6 +1,5 @@
 import asyncio
 import queue
-import random
 import signal
 import sys
 import threading
@@ -164,7 +163,10 @@ class DialogSession:
 
             if event == 459:
                 self.is_user_querying = False
-                if random.randint(0, 100000)%1 == 0:
+                # 安抚话术：仅在 config.enable_filler_speech 开启时下发
+                # 原代码 random.randint(...) % 1 == 0 是永真 demo，会在每次一句话结束后
+                # 都插入一句“这是查询到外部数据之前的安抚话术。”，短问答也被打断。
+                if getattr(config, "enable_filler_speech", False):
                     self.is_sending_chat_tts_text = True
                     asyncio.create_task(self.trigger_chat_tts_text())
                     asyncio.create_task(self.trigger_chat_rag_text())

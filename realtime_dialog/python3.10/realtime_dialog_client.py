@@ -7,6 +7,14 @@ import websockets
 import config
 import protocol
 
+# websockets 13.0 将 extra_headers 重命名为 additional_headers，14.0 移除旧参数。
+# 这里做一次运行时探测，同时兼容老版 (≤8.x 、 9.x 、 10.x 、 11.x 、 12.x) 和新版 (≥13.x)。
+try:
+    _WS_MAJOR = int(websockets.__version__.split(".")[0])
+except Exception:
+    _WS_MAJOR = 0
+_WS_HEADERS_KW = "additional_headers" if _WS_MAJOR >= 13 else "extra_headers"
+
 
 class RealtimeDialogClient:
     def __init__(self, config: Dict[str, Any], session_id: str, output_audio_format: str = "pcm",
@@ -24,10 +32,15 @@ class RealtimeDialogClient:
         print(f"url: {self.config['base_url']}, headers: {self.config['headers']}")
         self.ws = await websockets.connect(
             self.config['base_url'],
-            extra_headers=self.config['headers'],
+            **{_WS_HEADERS_KW: self.config['headers']},
             ping_interval=None
         )
-        self.logid = self.ws.response_headers.get("X-Tt-Logid")
+        # websockets 13.0+ 不再提供 ws.response_headers，改为 ws.response.headers
+        try:
+            _resp_headers = self.ws.response_headers
+        except AttributeError:
+            _resp_headers = self.ws.response.headers
+        self.logid = _resp_headers.get("X-Tt-Logid")
         print(f"dialog server response logid: {self.logid}")
 
         # StartConnection request
@@ -64,7 +77,7 @@ class RealtimeDialogClient:
     async def say_hello(self) -> None:
         """发送Hello消息"""
         payload = {
-            "content": "你好，我是豆包，有什么可以帮助你的？",
+            "content": "您好，您有什么需要呢？",
         }
         hello_request = bytearray(protocol.generate_header())
         hello_request.extend(int(300).to_bytes(4, 'big'))

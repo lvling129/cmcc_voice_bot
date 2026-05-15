@@ -50,6 +50,10 @@ __pycache__/
 *.pyo
 *.egg-info/
 .venv/
+.venv310/
+
+# Python/audio runtime artifacts
+*.pcm
 
 # macOS metadata
 __MACOSX/
