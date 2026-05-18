@@ -319,9 +319,12 @@ class DialogSession:
         await self.client.task_request(silence_data)
 
     async def process_microphone_input(self) -> None:
-        await self.client.say_hello()
-        await self.say_hello_over_event.wait()
-        await self.client.chat_text_query("你好，我也叫豆包")
+        # 本项目由 AVVTN 唤醒词驱动（喊唤醒词后才开始对话），C++ 端有独立的唤醒应答音，
+        # 不需要豆包再主动播报 "您好,您有什么需要呢？" 迎宾语。
+        # 同时去掉之前的硬编码测试文本 chat_text_query("你好,我也叫豆包")，避免每次启动
+        # 都触发一轮无意义对话。
+        # say_hello_over_event 直接置位，避免下游若有依赖时死锁。
+        self.say_hello_over_event.set()
 
         """处理麦克风输入"""
         chunk_size_bytes = config.input_audio_config["chunk"] * 2  # paInt16 = 2 bytes/sample

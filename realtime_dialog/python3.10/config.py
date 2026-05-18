@@ -30,7 +30,7 @@ start_session_req = {
         },
     },
     "tts": {
-        "speaker": "zh_male_yunzhou_jupiter_bigtts",
+        "speaker": "zh_female_vv_jupiter_bigtts",
         # "speaker": "S_XXXXXX",  // 指定自定义的复刻音色,需要填下character_manifest
         # "speaker": "ICL_zh_female_aojiaonvyou_tob" // 指定官方复刻音色，不需要填character_manifest
         "audio_config": {
@@ -44,7 +44,7 @@ start_session_req = {
         "system_role": _SYSTEM_ROLE,
         # speaking_style 已在 system_role 内详述，这里不再重复以免冲突
         "location": {
-          "city": "北京",
+          "city": "南京",
         },
         "extra": {
             "strict_audit": False,
