@@ -21,7 +21,7 @@ void ROSManager::init(int argc, char const *argv[]) {
         status_publisher_ = node_->create_publisher<std_msgs::msg::String>("robot_avvtn_status", 10);
         chat_history_nostream_publisher_ = node_->create_publisher<std_msgs::msg::String>("robot_avvtn_chat_history_nostream", 10);
         wakeup_detail_publisher_ = node_->create_publisher<std_msgs::msg::String>("avvtn_wake", 10);
-        voice_wakeup_publisher_ = node_->create_publisher<std_msgs::msg::String>("/voice_wakeup", 10);
+        voice_wakeup_publisher_ = node_->create_publisher<std_msgs::msg::String>("voice_wake_topic", 10);
 
         // 麦克风 PCM 发布器：高带宽实时流，采用 BEST_EFFORT QoS 避免丢包阅塞
         rclcpp::QoS mic_qos(rclcpp::KeepLast(20));
