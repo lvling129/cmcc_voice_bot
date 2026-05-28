@@ -375,7 +375,7 @@ void AvvtnCapture::handleAudioWake(avvtn_callback_data_t *data_p)
     LOG_INFO("AVVTN接收到唤醒语音: %s", wake_str.c_str());
 
     //aiui_wrapper_.ResetWakeup();
-    is_sleeping = true;
+    is_sleeping = false;
 
     /* 两次唤醒只发送一次wakeup给AIUI */
     std::string msg_type;
@@ -427,7 +427,7 @@ void AvvtnCapture::handleAudioWake(avvtn_callback_data_t *data_p)
         };
         ROSManager::getInstance().publishChatHistoryNoStream(answer.dump());
 
-        aiui_wrapper_.Wakeup();
+        //aiui_wrapper_.Wakeup();
     }
     std::cout << "接收到唤醒事件: " << wake_str << std::endl;
     return;
@@ -437,7 +437,7 @@ void AvvtnCapture::handleTouchWake()
 {
     LOG_INFO("收到触摸唤醒事件 /touch_wakeup");
 
-    is_sleeping = true;
+    is_sleeping = false;
 
     /*发送ROS2话题robot_avvtn_chat_history  答*/
     nlohmann::json answer = {
@@ -450,7 +450,7 @@ void AvvtnCapture::handleTouchWake()
 
     system("ffplay -autoexit -nodisp -ar 24000 -ac 1 -f f32le /home/nvidia/cmcc_voice_bot/bin/output.pcm > /dev/null 2>&1 &");
 
-    aiui_wrapper_.Wakeup();
+    //aiui_wrapper_.Wakeup();
     LOG_INFO("触摸唤醒: aiui_wrapper_.Wakeup() 已执行");
 }
 
