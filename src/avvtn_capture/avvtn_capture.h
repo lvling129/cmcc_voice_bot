@@ -65,6 +65,11 @@ public:
     }
 
     /**
+     * @brief 触摸唤醒处理（由 /touch_wakeup 话题回调触发）
+     */
+    void handleTouchWake();
+
+    /**
      * @brief 测试设置beam
      * @param beam_id beamID
      * @return 0表示成功，非0表示失败

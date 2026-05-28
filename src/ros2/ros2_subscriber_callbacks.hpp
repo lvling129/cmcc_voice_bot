@@ -18,6 +18,13 @@
  */
 void WakeUpResultCallback(const std_msgs::msg::String::SharedPtr msg);
 
+/**
+ * @brief 触摸唤醒话题回调
+ * @param msg 话题消息
+ * @note 话题名: /touch_wakeup
+ */
+void TouchWakeupCallback(const std_msgs::msg::String::SharedPtr msg);
+
 // 在此处添加更多订阅回调的声明，例如：
 // void onCommand(const std_msgs::msg::String::SharedPtr msg);
 // void onConfigUpdate(const std_msgs::msg::String::SharedPtr msg);

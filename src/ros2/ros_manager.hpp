@@ -36,6 +36,9 @@ public:
     // 发布带角度的唤醒消息给PC2做转向动作
     void publishWakeupDetail(const std::string& chat_msg);
 
+    // 发布语音唤醒事件（topic: /voice_wakeup）
+    void publishVoiceWakeup(const std::string& msg);
+
     // 发布 AVVTN AEC 后的麦克风 PCM（供豆包 Python 订阅）
     // 格式: 16k mono S16LE, BEST_EFFORT QoS, topic=/avvtn/mic_pcm
     void publishMicPcm(const uint8_t* data, size_t len);
@@ -65,6 +68,7 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr chat_history_nostream_publisher_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr wakeup_detail_publisher_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr voice_wakeup_publisher_;
     rclcpp::Publisher<std_msgs::msg::UInt8MultiArray>::SharedPtr mic_pcm_publisher_;
 
     // 保存订阅者

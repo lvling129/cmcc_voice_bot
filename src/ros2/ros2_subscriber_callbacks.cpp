@@ -26,3 +26,13 @@ void WakeUpResultCallback(const std_msgs::msg::String::SharedPtr msg)
         LOG_WARN("唤醒结果不是 success, 不设置波束");
     }
 }
+
+void TouchWakeupCallback(const std_msgs::msg::String::SharedPtr msg)
+{
+    LOG_INFO("收到触摸唤醒话题: {%s}", msg->data.c_str());
+    if (AvvtnCapture::getInstance()) {
+        AvvtnCapture::getInstance()->handleTouchWake();
+    } else {
+        LOG_ERROR("AvvtnCapture 实例为空，无法处理触摸唤醒");
+    }
+}

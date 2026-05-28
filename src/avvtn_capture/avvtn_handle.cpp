@@ -401,6 +401,8 @@ void AvvtnCapture::handleAudioWake(avvtn_callback_data_t *data_p)
     // 可以设置多种唤醒方式 比如 需要语音唤醒 或者 只需要人脸唤醒 当前默认使用语音唤醒
     if (wake_mode_ == "ivw")
     {
+        // 发布唤醒事件到 /voice_wakeup 话题
+        ROSManager::getInstance().publishVoiceWakeup(wake_str);
         /*发送ROS2话题robot_avvtn_chat_history  问*/
         nlohmann::json wake_up = {
                 {"speaker", "person"},
@@ -430,3 +432,23 @@ void AvvtnCapture::handleAudioWake(avvtn_callback_data_t *data_p)
     std::cout << "接收到唤醒事件: " << wake_str << std::endl;
     return;
 }
+
+void AvvtnCapture::handleTouchWake()
+{
+    LOG_INFO("收到触摸唤醒事件 /touch_wakeup");
+
+    is_sleeping = true;
+
+    /*发送ROS2话题robot_avvtn_chat_history  答*/
+    nlohmann::json answer = {
+        {"speaker", "robot"},
+        {"text", "你好"},
+        {"is_skill", "0"},
+        {"is_knowledge", "0"}
+    };
+    ROSManager::getInstance().publishChatHistoryNoStream(answer.dump());
+
+    aiui_wrapper_.Wakeup();
+    LOG_INFO("触摸唤醒: aiui_wrapper_.Wakeup() 已执行");
+}
+
