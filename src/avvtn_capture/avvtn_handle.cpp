@@ -409,8 +409,12 @@ void AvvtnCapture::handleAudioWake(avvtn_callback_data_t *data_p)
         ROSManager::getInstance().publishChatHistory(wake_up.dump());
         ROSManager::getInstance().publishChatHistoryNoStream(wake_up.dump());
 
-        // 唤醒直接播放唤醒音频，优化用户体验
-        system("aplay -r 16000 -f S16_LE -c 1 /home/nvidia/cmcc_voice_bot/bin/wake_up_x5_lingxiaoyue_flow.pcm > /dev/null 2>&1 &");
+        // 唤醒直接播放唤醒音频，仅首次唤醒播放
+        static bool first_wakeup_audio_played = false;
+        if (!first_wakeup_audio_played) {
+            system("ffplay -autoexit -nodisp -ar 24000 -ac 1 -f f32le /home/nvidia/cmcc_voice_bot/bin/output.pcm > /dev/null 2>&1 &");
+            first_wakeup_audio_played = true;
+        }
 
         /*发送ROS2话题robot_avvtn_chat_history  答*/
         nlohmann::json answer = {

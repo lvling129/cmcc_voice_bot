@@ -15,8 +15,8 @@ with open(_SYSTEM_PROMPT_FILE, "r", encoding="utf-8") as _f:
 ws_connect_config = {
     "base_url": "wss://openspeech.bytedance.com/api/v3/realtime/dialogue",
     "headers": {
-        "X-Api-App-ID": "5244401887",
-        "X-Api-Access-Key": "1cuNco4HeJZVsl-IoBQn9r5ZjUs8ouxj",
+        "X-Api-App-ID": "8464926197",
+        "X-Api-Access-Key": "SBZVR2A_sPzQip1q6r-h-LBRlwmXKgBH",
         "X-Api-Resource-Id": "volc.speech.dialog",  # 固定值
         "X-Api-App-Key": "PlgvMymc7f3tQnJ6",  # 固定值
         "X-Api-Connect-Id": str(uuid.uuid4()),
@@ -40,7 +40,7 @@ start_session_req = {
         },
     },
     "dialog": {
-        "bot_name": "灵犀",
+        "bot_name": "灵犀灵犀",
         "system_role": _SYSTEM_ROLE,
         # speaking_style 已在 system_role 内详述，这里不再重复以免冲突
         "location": {

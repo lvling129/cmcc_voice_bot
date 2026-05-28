@@ -314,7 +314,17 @@ class DialogSession:
             print(f"音频文件处理完成，等待服务器响应...")
 
     async def process_silence_audio(self) -> None:
-        """发送静音音频"""
+        """发送一帧 10ms 静音 PCM（320 字节 = 160 samples @ 16kHz/16-bit/mono）。
+
+        【DEPRECATED】当前项目未调用此函数：
+        - ROS2 模式下的 idle 保活已由 ros2_mic_source.Ros2MicSource.read() 中的
+          「超一帧时长未收到真实 PCM 则返回 chunk_size 字节静音」策略接管；
+        - pyaudio 模式下麦克风本身持续输出环境本底声，不存在 idle 超时；
+        - ASR EOS（event=459）由 AVVTN VAD 段尾驱动，不需客户端补静音。
+
+        保留作为备用工具（如需手动触发单次静音推送，可直接调用），但请勿在主流程保活
+        路径中使用此函数，避免与 Ros2MicSource 重复推流、增加不必要的 audio token 计费。
+        """
         silence_data = b'\x00' * 320
         await self.client.task_request(silence_data)
 
