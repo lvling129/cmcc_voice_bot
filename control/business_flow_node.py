@@ -20,7 +20,7 @@ class BusinessFlowNode(Node):
 
         # 发布
         self.pub_ui = self.create_publisher(String, "/ui/switch_page", 10)
-        self.pub_tts = self.create_publisher(String, "/tts/speak", 10)
+        self.pub_tts = self.create_publisher(String, "/doubao_tts", 10)
         self.pub_state = self.create_publisher(String, "/business/current_state", 10)
 
         # 订阅

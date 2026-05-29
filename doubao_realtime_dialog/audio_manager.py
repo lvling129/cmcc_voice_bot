@@ -172,23 +172,23 @@ class DialogSession:
                 self.is_user_querying = False
                 # 安抚话术：仅在 config.enable_filler_speech 开启时下发
                 # 原代码 random.randint(...) % 1 == 0 是永真 demo，会在每次一句话结束后
-                # 都插入一句“这是查询到外部数据之前的安抚话术。”，短问答也被打断。
+                # 都插入一句"请稍等，正在为您查询。"，短问答也被打断。
                 if getattr(config, "enable_filler_speech", False):
                     self.is_sending_chat_tts_text = True
-                    asyncio.create_task(self.trigger_chat_tts_text())
+                    asyncio.create_task(self.trigger_chat_tts_text("请稍等，正在为您查询。"))
                     asyncio.create_task(self.trigger_chat_rag_text())
         elif response['message_type'] == 'SERVER_ERROR':
             print(f"服务器错误: {response['payload_msg']}")
             raise Exception("服务器错误")
 
-    async def trigger_chat_tts_text(self):
-        """概率触发发送ChatTTSText请求"""
-        print("hit ChatTTSText event, start sending...")
+    async def trigger_chat_tts_text(self, text: str):
+        """发送ChatTTSText请求"""
+        print(f"hit ChatTTSText event, start sending: {text}")
         await self.client.chat_tts_text(
             is_user_querying=self.is_user_querying,
             start=True,
             end=False,
-            content="这是查询到外部数据之前的安抚话术。",
+            content=text,
         )
         await self.client.chat_tts_text(
             is_user_querying=self.is_user_querying,
@@ -201,6 +201,19 @@ class DialogSession:
         await asyncio.sleep(5) # 模拟查询外部RAG的耗时，这里为了不影响GTA安抚话术的播报，直接sleep 5秒
         print("hit ChatRAGText event, start sending...")
         await self.client.chat_rag_text(self.is_user_querying, external_rag='[{"title":"北京天气","content":"今天北京整体以晴到多云为主，但西部和北部地带可能会出现分散性雷阵雨，特别是午后至傍晚时段需注意突发降雨。\n💨 风况与湿度\n风力较弱，一般为 2–3 级南风或西南风\n白天湿度较高，早晚略凉爽"}]')
+
+    async def _tts_topic_loop(self):
+        """轮询 /doubao_tts 话题队列，收到文本后调用 trigger_chat_tts_text 发送给大模型做 TTS"""
+        while self.is_running:
+            if self._ros2_mic is None:
+                await asyncio.sleep(0.1)
+                continue
+            text = self._ros2_mic.get_tts_text()
+            if text:
+                print(f"[doubao_tts] 开始发送 TTS: {text}")
+                await self.trigger_chat_tts_text(text)
+            else:
+                await asyncio.sleep(0.1)
 
     def _keyboard_signal(self, sig, frame):
         print(f"receive keyboard Ctrl+C")
@@ -344,6 +357,10 @@ class DialogSession:
             self._ros2_mic = Ros2MicSource()
             self._ros2_mic.start()
             print("[豆包] mic-source=ros2，等待 /avvtn/mic_pcm 数据...")
+
+            # 启动 TTS 话题轮询任务（复用 Ros2MicSource 节点的 TTS 队列）
+            asyncio.create_task(self._tts_topic_loop())
+
             while self.is_recording:
                 try:
                     audio_data = await self._ros2_mic.read(chunk_size_bytes)

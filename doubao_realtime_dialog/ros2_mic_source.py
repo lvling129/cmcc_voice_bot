@@ -20,24 +20,28 @@ import asyncio
 import threading
 import time
 from typing import Optional
+from queue import Queue, Empty
 
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from std_msgs.msg import UInt8MultiArray
+from std_msgs.msg import UInt8MultiArray, String
 
 
 class Ros2MicSource:
     """ROS2 PCM 订阅器，提供与 pyaudio Stream 类似的 read 接口"""
 
     DEFAULT_TOPIC = "/avvtn/mic_pcm"
+    DEFAULT_TTS_TOPIC = "/doubao_tts"
     # 5 秒 16k S16LE 缓冲上限：16000 * 2 * 5 = 160000B
     DEFAULT_MAX_BUFFER_BYTES = 16000 * 2 * 5
 
     def __init__(self, topic: str = DEFAULT_TOPIC,
+                 tts_topic: str = DEFAULT_TTS_TOPIC,
                  node_name: str = "doubao_mic_source",
                  max_buffer_bytes: int = DEFAULT_MAX_BUFFER_BYTES) -> None:
         self.topic = topic
+        self.tts_topic = tts_topic
         self.node_name = node_name
         self.max_buffer_bytes = max_buffer_bytes
 
@@ -45,6 +49,9 @@ class Ros2MicSource:
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
         self._first_packet_seen = False
+
+        # TTS 文本队列（线程安全）
+        self._tts_queue: Queue = Queue()
 
         self._node: Optional[Node] = None
         self._executor = None
@@ -69,13 +76,17 @@ class Ros2MicSource:
         self._node.create_subscription(
             UInt8MultiArray, self.topic, self._on_pcm, qos)
 
+        # 订阅 /doubao_tts 话题（用于接收外部文本并转 TTS）
+        self._node.create_subscription(
+            String, self.tts_topic, self._on_tts_text, 10)
+
         self._running = True
         self._spin_thread = threading.Thread(
             target=self._spin_loop, name="ros2_mic_spin", daemon=True)
         self._spin_thread.start()
 
         self._node.get_logger().info(
-            f"ROS2 mic source 已启动，订阅 topic={self.topic}")
+            f"ROS2 mic source 已启动，订阅 topic={self.topic}, tts_topic={self.tts_topic}")
 
     def stop(self) -> None:
         """停止节点和 spin 线程，唤醒任何阻塞的 read"""
@@ -96,6 +107,22 @@ class Ros2MicSource:
                 rclpy.spin_once(self._node, timeout_sec=0.1)
         except Exception as e:
             print(f"[ros2_mic_source] spin 线程异常: {e}")
+
+    # -- TTS 回调 -------------------------------------------------------------
+
+    def _on_tts_text(self, msg: String) -> None:
+        """收到 /doubao_tts 话题消息，放入 TTS 队列"""
+        text = msg.data.strip()
+        if text:
+            print(f"[ros2_mic_source] 收到 TTS 文本: {text}")
+            self._tts_queue.put(text)
+
+    def get_tts_text(self) -> Optional[str]:
+        """非阻塞获取一条待 TTS 的文本，无数据时返回 None"""
+        try:
+            return self._tts_queue.get_nowait()
+        except Empty:
+            return None
 
     # -- 数据回调 ------------------------------------------------------------
 
