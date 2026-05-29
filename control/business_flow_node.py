@@ -1,3 +1,4 @@
+import json
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
@@ -26,6 +27,11 @@ class BusinessFlowNode(Node):
         # 订阅
         self.create_subscription(String, "/ui/touch_event", self.on_ui_touch, 10)
         self.create_subscription(String, "/api/verify_result", self.on_api_result, 10)
+        self.create_subscription(String, "/touch_topic", self.on_touch_topic, 10)
+
+        # 语音业务缓存数据
+        self.phone_number = ""
+        self.sms_verify_code = ""
 
         self.get_logger().info("✅ 终端业务流程节点已启动")
         self.switch_state(BusinessState.S0_IDLE)
@@ -61,16 +67,16 @@ class BusinessFlowNode(Node):
             tts_text = "正在请求验证码，请稍候"
 
         elif s == BusinessState.S3_INPUT_CODE:
-            ui_page = "code_input"
+            ui_page = "smscode_input"
             tts_text = "请使用触屏输入短信验证码"
 
         elif s == BusinessState.S4_VERIFYING:
-            ui_page = "verifying"
+            ui_page = "smscode_verifying"
             tts_text = "正在验证信息，请稍候"
 
         elif s == BusinessState.S5_RESULT_SUCCESS:
-            ui_page = "success"
-            tts_text = "业务办理成功，结果已显示在屏幕上"
+            ui_page = "balance_result"
+            tts_text = "已为您查询话费余额，请看屏幕"
 
         elif s == BusinessState.S6_RESULT_FAIL:
             ui_page = "fail"
@@ -112,6 +118,39 @@ class BusinessFlowNode(Node):
         else:
             self.switch_state(BusinessState.S6_RESULT_FAIL)
             self.create_timer(2.0, lambda: self.switch_state(BusinessState.S3_INPUT_CODE))
+
+    def on_touch_topic(self, msg):
+        """语音业务指令处理（/touch_topic）"""
+        try:
+            data = json.loads(msg.data)
+            business_type = data.get("business_type", "")
+            content = data.get("content", "")
+            
+            self.get_logger().info(f"语音业务: business_type={business_type}, content={content}")
+
+            if business_type == "query_balance":
+                # 查询余额，进入手机号输入页
+                if self.current_state == BusinessState.S0_IDLE:
+                    self.switch_state(BusinessState.S1_INPUT_PHONE)
+
+            elif business_type == "phone_number":
+                # 收到手机号，直接进入验证码输入页
+                if content and self.current_state == BusinessState.S1_INPUT_PHONE:
+                    self.phone_number = content
+                    self.get_logger().info(f"收到手机号: {content}")
+                    self.switch_state(BusinessState.S3_INPUT_CODE)
+
+            elif business_type == "sms_verify_code":
+                # 收到验证码，自动确认
+                if content and self.current_state == BusinessState.S3_INPUT_CODE:
+                    self.sms_verify_code = content
+                    self.get_logger().info(f"收到验证码: {content}")
+                    self.switch_state(BusinessState.S5_RESULT_SUCCESS)
+
+        except json.JSONDecodeError as e:
+            self.get_logger().error(f"/touch_topic JSON 解析失败: {e}")
+        except Exception as e:
+            self.get_logger().error(f"/touch_topic 处理异常: {e}")
 
 def main(args=None):
     rclpy.init(args=args)
