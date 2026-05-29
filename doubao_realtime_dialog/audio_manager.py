@@ -98,7 +98,6 @@ class DialogSession:
         self.is_sending_chat_tts_text = False
         self.audio_buffer = b''
 
-        signal.signal(signal.SIGINT, self._keyboard_signal)
         self.audio_queue = queue.Queue()
         if not self.is_audio_file_input:
             self.audio_device = AudioDeviceManager(
@@ -203,19 +202,34 @@ class DialogSession:
         await self.client.chat_rag_text(self.is_user_querying, external_rag='[{"title":"北京天气","content":"今天北京整体以晴到多云为主，但西部和北部地带可能会出现分散性雷阵雨，特别是午后至傍晚时段需注意突发降雨。\n💨 风况与湿度\n风力较弱，一般为 2–3 级南风或西南风\n白天湿度较高，早晚略凉爽"}]')
 
     async def _tts_topic_loop(self):
-        """轮询 /doubao_tts 话题队列，收到文本后调用 trigger_chat_tts_text 发送给大模型做 TTS"""
+        """轮询 /doubao_tts 话题队列，收到文本后发送给大模型做 TTS"""
+        self._tts_session_initialized = False
         while self.is_running:
             if self._ros2_mic is None:
                 await asyncio.sleep(0.1)
                 continue
             text = self._ros2_mic.get_tts_text()
             if text:
-                print(f"[doubao_tts] 开始发送 TTS: {text}")
-                await self.trigger_chat_tts_text(text)
+                if not self._tts_session_initialized:
+                    # 首次 TTS：用 chat_text_query 激活会话，直接播报用户要 TTS 的文本
+                    # 构造 prompt 让模型只复述文本，不产生额外回复
+                    query_text = f"请直接播报以下内容，不要添加任何其他内容：{text}"
+                    print(f"[doubao_tts] 首次 TTS，激活会话并播报: {text}")
+                    await self.client.chat_text_query(query_text)
+                    self._tts_session_initialized = True
+                else:
+                    # 后续 TTS：用 chat_tts_text 直接合成
+                    print(f"[doubao_tts] 发送 TTS: {text}")
+                    await self.trigger_chat_tts_text(text)
             else:
                 await asyncio.sleep(0.1)
 
     def _keyboard_signal(self, sig, frame):
+        print(f"receive keyboard Ctrl+C")
+        self.stop()
+
+    async def _async_stop(self):
+        """异步停止（用于 asyncio 信号处理）"""
         print(f"receive keyboard Ctrl+C")
         self.stop()
 
@@ -391,6 +405,10 @@ class DialogSession:
 
     async def start(self) -> None:
         """启动对话会话"""
+        loop = asyncio.get_event_loop()
+        # 注册 Ctrl+C 信号处理
+        loop.add_signal_handler(signal.SIGINT, lambda: asyncio.create_task(self._async_stop()))
+        
         try:
             await self.client.connect()
 
