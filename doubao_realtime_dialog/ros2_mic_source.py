@@ -17,6 +17,7 @@
 """
 
 import asyncio
+import json
 import threading
 import time
 from typing import Optional
@@ -33,15 +34,18 @@ class Ros2MicSource:
 
     DEFAULT_TOPIC = "/avvtn/mic_pcm"
     DEFAULT_TTS_TOPIC = "/doubao_tts"
+    DEFAULT_CHAT_HISTORY_TOPIC = "/chat_history"
     # 5 秒 16k S16LE 缓冲上限：16000 * 2 * 5 = 160000B
     DEFAULT_MAX_BUFFER_BYTES = 16000 * 2 * 5
 
     def __init__(self, topic: str = DEFAULT_TOPIC,
                  tts_topic: str = DEFAULT_TTS_TOPIC,
+                 chat_history_topic: str = DEFAULT_CHAT_HISTORY_TOPIC,
                  node_name: str = "doubao_mic_source",
                  max_buffer_bytes: int = DEFAULT_MAX_BUFFER_BYTES) -> None:
         self.topic = topic
         self.tts_topic = tts_topic
+        self.chat_history_topic = chat_history_topic
         self.node_name = node_name
         self.max_buffer_bytes = max_buffer_bytes
 
@@ -57,6 +61,9 @@ class Ros2MicSource:
         self._executor = None
         self._spin_thread: Optional[threading.Thread] = None
         self._running = False
+        
+        # 聊天历史发布器
+        self._pub_chat_history = None
 
     # -- 启动 / 停止 ---------------------------------------------------------
 
@@ -79,6 +86,16 @@ class Ros2MicSource:
         # 订阅 /doubao_tts 话题（用于接收外部文本并转 TTS）
         self._node.create_subscription(
             String, self.tts_topic, self._on_tts_text, 10)
+
+        # 发布 /chat_history 话题（用于发送 ASR 识别结果）
+        chat_history_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10,
+            durability=DurabilityPolicy.VOLATILE,
+        )
+        self._pub_chat_history = self._node.create_publisher(
+            String, self.chat_history_topic, chat_history_qos)
 
         self._running = True
         self._spin_thread = threading.Thread(
@@ -118,11 +135,30 @@ class Ros2MicSource:
             self._tts_queue.put(text)
 
     def get_tts_text(self) -> Optional[str]:
-        """非阻塞获取一条待 TTS 的文本，无数据时返回 None"""
+        """非阻塞获取一条 TTS 文本，无数据时返回 None"""
         try:
             return self._tts_queue.get_nowait()
         except Empty:
             return None
+    
+    def publish_chat_history(self, content: str, speaker: str) -> None:
+        """发布聊天历史到 /chat_history 话题
+        
+        Args:
+            content: 聊天内容（ASR 识别结果或 TTS 回复文本）
+            speaker: 说话者，"PERSON"（用户）或 "ROBOT"（豆包）
+        """
+        if self._pub_chat_history is None or not self._node:
+            return
+        try:
+            msg_data = json.dumps({
+                "speaker": speaker,
+                "content": content
+            }, ensure_ascii=False)  # 直接输出中文，不进行 Unicode 转义
+            self._pub_chat_history.publish(String(data=msg_data))
+            self._node.get_logger().info(f"发布聊天历史 [{speaker}]: {content}")
+        except Exception as e:
+            self._node.get_logger().error(f"发布聊天历史失败: {e}")
 
     # -- 数据回调 ------------------------------------------------------------
 

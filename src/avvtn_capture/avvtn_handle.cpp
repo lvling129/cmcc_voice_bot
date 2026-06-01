@@ -441,12 +441,11 @@ void AvvtnCapture::handleTouchWake()
 
     /*发送ROS2话题robot_avvtn_chat_history  答*/
     nlohmann::json answer = {
-        {"speaker", "robot"},
-        {"text", "你好"},
-        {"is_skill", "0"},
-        {"is_knowledge", "0"}
+        {"speaker", "ROBOT"},
+        {"content", "您好，请问有什么可以帮您的？"},
     };
-    ROSManager::getInstance().publishChatHistoryNoStream(answer.dump());
+    
+    //ROSManager::getInstance().publishChatHistoryNoStream(answer.dump());
 
     system("ffplay -autoexit -nodisp -ar 24000 -ac 1 -f f32le /home/nvidia/cmcc_voice_bot/bin/output.pcm > /dev/null 2>&1 &");
 

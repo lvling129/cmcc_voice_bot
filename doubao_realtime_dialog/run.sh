@@ -27,6 +27,9 @@ ROS_SETUP="${ROS_SETUP:-/opt/ros/humble/setup.bash}"
 PYTHON="${PYTHON:-/usr/bin/python3.10}"
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
 
+# 使用 Fast DDS 替代 CycloneDDS，避免网卡配置问题
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
 # ---- 3. 前置检查 ------------------------------------------------------------
 if [ ! -f "${ROS_SETUP}" ]; then
     echo "[run.sh] 错误: 未找到 ROS2 setup.bash: ${ROS_SETUP}" >&2

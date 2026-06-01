@@ -97,6 +97,7 @@ class DialogSession:
         self.is_user_querying = False
         self.is_sending_chat_tts_text = False
         self.audio_buffer = b''
+        self.tts_text_buffer = ""  # 累积 TTS 文本
 
         self.audio_queue = queue.Queue()
         if not self.is_audio_file_input:
@@ -158,6 +159,22 @@ class DialogSession:
                     except queue.Empty:
                         continue
                 self.is_user_querying = True
+                self.tts_text_buffer = ""  # 清空 TTS 文本缓存
+
+            # ASR 识别结果（流式，event 451）
+            if event == 451:
+                payload_msg_data = payload_msg.get("results", [])
+                if payload_msg_data:
+                    # 获取最后一个结果
+                    last_result = payload_msg_data[-1]
+                    asr_text = last_result.get("text", "")
+                    is_interim = last_result.get("is_interim", True)
+                    # 只在最终结果时输出并发布到话题
+                    if not is_interim and asr_text:
+                        print(f"[ASR 完整识别结果]: {asr_text}")
+                        # 发布到 /chat_history 话题
+                        if self._ros2_mic:
+                            self._ros2_mic.publish_chat_history(asr_text, speaker="PERSON")
 
             if event == 350 and self.is_sending_chat_tts_text and payload_msg.get("tts_type") in ["chat_tts_text", "external_rag"]:
                 while not self.audio_queue.empty():
@@ -171,11 +188,26 @@ class DialogSession:
                 self.is_user_querying = False
                 # 安抚话术：仅在 config.enable_filler_speech 开启时下发
                 # 原代码 random.randint(...) % 1 == 0 是永真 demo，会在每次一句话结束后
-                # 都插入一句"请稍等，正在为您查询。"，短问答也被打断。
+                # 都插入一句“请稍等，正在为您查询。”，短问答也被打断。
                 if getattr(config, "enable_filler_speech", False):
                     self.is_sending_chat_tts_text = True
                     asyncio.create_task(self.trigger_chat_tts_text("请稍等，正在为您查询。"))
                     asyncio.create_task(self.trigger_chat_rag_text())
+            
+            # TTS 文本流式返回（event 550）
+            if event == 550:
+                content = payload_msg.get("content", "")
+                if content:
+                    self.tts_text_buffer += content
+
+            # TTS 结束（event 359），打印完整文本并发布到话题
+            if event == 359:
+                if self.tts_text_buffer:
+                    print(f"[TTS 完整回复]: {self.tts_text_buffer}")
+                    # 发布到 /chat_history 话题
+                    if self._ros2_mic:
+                        self._ros2_mic.publish_chat_history(self.tts_text_buffer, speaker="ROBOT")
+                    self.tts_text_buffer = ""
         elif response['message_type'] == 'SERVER_ERROR':
             print(f"服务器错误: {response['payload_msg']}")
             raise Exception("服务器错误")
