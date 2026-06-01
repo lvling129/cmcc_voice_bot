@@ -447,7 +447,7 @@ void AvvtnCapture::handleTouchWake()
     
     //ROSManager::getInstance().publishChatHistoryNoStream(answer.dump());
 
-    system("ffplay -autoexit -nodisp -ar 24000 -ac 1 -f f32le /home/nvidia/cmcc_voice_bot/bin/output.pcm > /dev/null 2>&1 &");
+    // system("ffplay -autoexit -nodisp -ar 24000 -ac 1 -f f32le /home/nvidia/cmcc_voice_bot/bin/output.pcm > /dev/null 2>&1 &");
 
     //aiui_wrapper_.Wakeup();
     LOG_INFO("触摸唤醒已执行");

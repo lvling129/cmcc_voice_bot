@@ -28,14 +28,14 @@ class BusinessFlowNode(Node):
 
         # 订阅
         self.create_subscription(String, "/touch_topic", self.on_touch_topic, 10)
-
-        self.create_subscription(String, "/ui/touch_event", self.on_ui_touch, 10)
-        self.create_subscription(String, "/api/verify_result", self.on_api_result, 10)
-        self.create_subscription(String, "/api_smscode_result", self.on_api_smscode_result, 10)
+        self.create_subscription(String, "/api_response", self.on_api_response, 10)
 
         # 语音业务缓存数据
         self.phone_number = ""
         self.sms_verify_code = ""
+
+        # 定时器引用（避免资源泄漏）
+        self._state_timer = None
 
         self.get_logger().info("✅ 终端业务流程节点已启动")
         self.switch_state(BusinessState.S0_IDLE)
@@ -44,6 +44,11 @@ class BusinessFlowNode(Node):
         """通用状态切换（所有业务共用逻辑）"""
         old_state = self.current_state
         self.current_state = new_state
+
+        # 销毁旧定时器（避免资源泄漏）
+        if self._state_timer is not None:
+            self._state_timer.cancel()
+            self._state_timer = None
 
         # 发布状态
         self.pub_state.publish(String(data=new_state))
@@ -67,7 +72,7 @@ class BusinessFlowNode(Node):
             tts_text = "请使用触屏输入11位手机号码"
 
         elif s == BusinessState.S2_WAIT_CODE:
-            ui_page = "smscode_loading"
+            ui_page = "smscode_input"
             tts_text = "正在请求验证码，请稍候"
 
         elif s == BusinessState.S3_INPUT_CODE:
@@ -95,39 +100,6 @@ class BusinessFlowNode(Node):
         self.pub_ui.publish(String(data=ui_data))
         self.pub_tts.publish(String(data=tts_text))
 
-    def on_ui_touch(self, msg):
-        """触屏事件（所有业务共用触发方式）"""
-        event = msg.data
-        curr = self.current_state
-        self.get_logger().info(f"触屏事件: {event}")
-
-        # 选择业务 → 进入手机号页
-        if event in ["balance", "traffic", "package", "sim_card"] and curr == BusinessState.S0_IDLE:
-            self.switch_state(BusinessState.S1_INPUT_PHONE)
-
-        # 手机号确认
-        elif event == "phone_confirm" and curr == BusinessState.S1_INPUT_PHONE:
-            self.switch_state(BusinessState.S2_WAIT_CODE)
-            self.create_timer(1.2, lambda: self.switch_state(BusinessState.S3_INPUT_CODE))
-
-        # 验证码确认
-        elif event == "code_confirm" and curr == BusinessState.S3_INPUT_CODE:
-            self.switch_state(BusinessState.S4_VERIFYING)
-
-        # 返回首页
-        elif event == "back_home":
-            self.switch_state(BusinessState.S0_IDLE)
-
-    def on_api_result(self, msg):
-        """API 验证结果通用处理"""
-        res = msg.data
-        if res == "success":
-            self.switch_state(BusinessState.S5_RESULT_SUCCESS)
-            self.create_timer(5.0, lambda: self.switch_state(BusinessState.S0_IDLE))
-        else:
-            self.switch_state(BusinessState.S6_RESULT_FAIL)
-            self.create_timer(2.0, lambda: self.switch_state(BusinessState.S3_INPUT_CODE))
-
     def on_touch_topic(self, msg):
         """语音业务指令处理（/touch_topic）"""
         try:
@@ -150,8 +122,8 @@ class BusinessFlowNode(Node):
                         self.get_logger().info(f"手机号校验通过: {content}")
                         # 发布请求发送验证码
                         self.pub_api.publish(String(data=json.dumps({
-                            "action": "send_sms_code",
-                            "content": content
+                            "func_name": "send_verify_code",
+                            "params_json": json.dumps({"phone_number": content})
                         })))
                         self.switch_state(BusinessState.S2_WAIT_CODE)
                     else:
@@ -160,14 +132,22 @@ class BusinessFlowNode(Node):
                         # 保持在 S1 状态，等待重新输入
 
             elif business_type == "sms_verify_code":
-                # 收到验证码，自动确认
+                # 收到验证码，发布到后端校验
                 if content and self.current_state == BusinessState.S3_INPUT_CODE:
                     self.sms_verify_code = content
-                    self.get_logger().info(f"收到验证码: {content}")
-                    self.switch_state(BusinessState.S5_RESULT_SUCCESS)
+                    self.get_logger().info(f"收到验证码，开始校验: {content}")
+                    # 发布验证码校验请求
+                    self.pub_api.publish(String(data=json.dumps({
+                        "func_name": "verify_code_check",
+                        "params_json": json.dumps({
+                            "phone_number": self.phone_number,
+                            "verify_code": content
+                        })
+                    })))
+                    self.switch_state(BusinessState.S4_VERIFYING)
 
             # 返回首页
-            elif event == "back_home":
+            elif business_type == "back_home":
                 self.switch_state(BusinessState.S0_IDLE)
 
         except json.JSONDecodeError as e:
@@ -187,23 +167,72 @@ class BusinessFlowNode(Node):
             return False
         return True
 
-    def on_api_smscode_result(self, msg):
-        """后端发送验证码结果"""
+    def on_api_response(self, msg):
+        """统一接收 API 调用返回结果"""
         try:
             data = json.loads(msg.data)
-            status = data.get("status", "")
-            if status == "success":
-                self.get_logger().info("验证码发送成功")
-                self.switch_state(BusinessState.S3_INPUT_CODE)
+            func_name = data.get("func_name", "")
+            code = data.get("code", -1)
+            message = data.get("message", "")
+            data_json_str = data.get("data_json", "{}")
+
+            # 解析 data_json
+            try:
+                data_json = json.loads(data_json_str)
+            except json.JSONDecodeError:
+                data_json = {}
+
+            self.get_logger().info(f"API 响应: func_name={func_name}, code={code}, message={message}")
+
+            # 根据 func_name 分发到不同的处理函数
+            if func_name == "send_verify_code":
+                self._handle_send_verify_code_result(code, message, data_json)
+            elif func_name == "verify_code_check":
+                self._handle_verify_code_result(code, message, data_json)
+            elif func_name == "query_balance":
+                self._handle_query_balance_result(code, message, data_json)
             else:
-                error_msg = data.get("msg", "验证码发送失败")
-                self.get_logger().error(f"验证码发送失败: {error_msg}")
-                self.pub_tts.publish(String(data=error_msg))
-                # 手机号验证失败，返回重新输入
-                self.switch_state(BusinessState.S7_PHONE_FAIL)
-                self.create_timer(2.0, lambda: self.switch_state(BusinessState.S1_INPUT_PHONE))
+                self.get_logger().warning(f"未知的 func_name: {func_name}")
+
+        except json.JSONDecodeError as e:
+            self.get_logger().error(f"/api_response JSON 解析失败: {e}")
         except Exception as e:
-            self.get_logger().error(f"/api/sms_result 处理异常: {e}")
+            self.get_logger().error(f"/api_response 处理异常: {e}")
+
+    def _handle_send_verify_code_result(self, code, message, data_json):
+        """处理发送验证码结果"""
+        if code == 0:
+            self.get_logger().info(f"验证码发送成功: {message}")
+            self.switch_state(BusinessState.S3_INPUT_CODE)
+        else:
+            self.get_logger().error(f"验证码发送失败: {message}")
+            self.pub_tts.publish(String(data=message))
+            self.switch_state(BusinessState.S7_PHONE_FAIL)
+            # 保存定时器引用，下次切换状态时会自动销毁
+            self._state_timer = self.create_timer(2.0, lambda: self.switch_state(BusinessState.S1_INPUT_PHONE))
+
+    def _handle_verify_code_result(self, code, message, data_json):
+        """处理验证码校验结果"""
+        if code == 0:
+            self.get_logger().info(f"验证码校验成功: {message}")
+            self.switch_state(BusinessState.S5_RESULT_SUCCESS)
+        else:
+            self.get_logger().error(f"验证码校验失败: {message}")
+            self.pub_tts.publish(String(data=message))
+            self.switch_state(BusinessState.S6_RESULT_FAIL)
+            self._state_timer = self.create_timer(2.0, lambda: self.switch_state(BusinessState.S3_INPUT_CODE))
+
+    def _handle_query_balance_result(self, code, message, data_json):
+        """处理话费查询结果"""
+        if code == 0:
+            balance = data_json.get("balance", 0)
+            self.get_logger().info(f"话费查询成功: 余额 {balance} 元")
+            self.switch_state(BusinessState.S5_RESULT_SUCCESS)
+        else:
+            self.get_logger().error(f"话费查询失败: {message}")
+            self.pub_tts.publish(String(data=message))
+            self.switch_state(BusinessState.S6_RESULT_FAIL)
+            self._state_timer = self.create_timer(2.0, lambda: self.switch_state(BusinessState.S0_IDLE))
 
 def main(args=None):
     rclpy.init(args=args)
