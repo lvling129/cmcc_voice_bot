@@ -96,6 +96,7 @@ class DialogSession:
         self.is_session_finished = False
         self.is_user_querying = False
         self.is_sending_chat_tts_text = False
+        self.is_muting_tts = False  # TTS 静音标志位（JSON 意图周期内禁止播放）
         self.audio_buffer = b''
         self.tts_text_buffer = ""  # 累积 TTS 文本
 
@@ -142,6 +143,9 @@ class DialogSession:
             # print(f"[audio] SERVER_ACK 音频帧: {len(response['payload_msg'])}B")
             if self.is_sending_chat_tts_text:
                 return
+            # 如果处于 TTS 静音期（JSON 意图），不将音频放入队列
+            if self.is_muting_tts:
+                return
             audio_data = response['payload_msg']
             if not self.is_audio_file_input:
                 self.audio_queue.put(audio_data)
@@ -160,6 +164,7 @@ class DialogSession:
                         continue
                 self.is_user_querying = True
                 self.tts_text_buffer = ""  # 清空 TTS 文本缓存
+                self.is_muting_tts = False  # 重置 TTS 静音标志位
 
             # ASR 识别结果（流式，event 451）
             if event == 451:
@@ -198,14 +203,38 @@ class DialogSession:
             if event == 550:
                 content = payload_msg.get("content", "")
                 if content:
+                    # 检测是否以 "{" 开头（可能是 JSON 意图格式），立即停止 TTS
+                    if content.startswith("{"):
+                        # 设置 TTS 静音标志位，整个周期内禁止音频入队
+                        self.is_muting_tts = True
+                        # 清空音频队列，停止当前 TTS 播报
+                        while not self.audio_queue.empty():
+                            try:
+                                self.audio_queue.get_nowait()
+                            except queue.Empty:
+                                continue
+                        print(f"[TTS 意图检测]: 检测到 JSON 开头，已停止当前 TTS 播报，静音整个周期")
+                    
                     self.tts_text_buffer += content
 
             # TTS 结束（event 359），打印完整文本并发布到话题
             if event == 359:
                 if self.tts_text_buffer:
                     print(f"[TTS 完整回复]: {self.tts_text_buffer}")
-                    # 发布到 /chat_history 话题
-                    if self._ros2_mic:
+                    # 检测是否为 JSON 意图格式，如果是则不发布到 /chat_history
+                    stripped = self.tts_text_buffer.strip()
+                    is_json_intent = False
+                    if stripped.startswith("{") and "intent" in stripped:
+                        try:
+                            import json
+                            json.loads(stripped)
+                            is_json_intent = True
+                            print(f"[TTS 跳过]: 检测到 JSON 意图格式，不发布到 /chat_history")
+                        except json.JSONDecodeError:
+                            pass
+                    
+                    # 只有非 JSON 格式的自然语言才发布到话题
+                    if not is_json_intent and self._ros2_mic:
                         self._ros2_mic.publish_chat_history(self.tts_text_buffer, speaker="ROBOT")
                     self.tts_text_buffer = ""
         elif response['message_type'] == 'SERVER_ERROR':
