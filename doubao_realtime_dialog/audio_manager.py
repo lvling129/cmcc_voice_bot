@@ -221,21 +221,27 @@ class DialogSession:
             if event == 359:
                 if self.tts_text_buffer:
                     print(f"[TTS 完整回复]: {self.tts_text_buffer}")
-                    # 检测是否为 JSON 意图格式，如果是则不发布到 /chat_history
+                    # 检测是否为 JSON 意图格式
                     stripped = self.tts_text_buffer.strip()
                     is_json_intent = False
+                    intent_data = None
+                    
                     if stripped.startswith("{") and "intent" in stripped:
                         try:
                             import json
-                            json.loads(stripped)
+                            intent_data = json.loads(stripped)
                             is_json_intent = True
-                            print(f"[TTS 跳过]: 检测到 JSON 意图格式，不发布到 /chat_history")
+                            print(f"[TTS 意图识别]: 检测到 JSON 意图格式: {intent_data}")
                         except json.JSONDecodeError:
                             pass
                     
-                    # 只有非 JSON 格式的自然语言才发布到话题
-                    if not is_json_intent and self._ros2_mic:
+                    # JSON 意图：发布到 /touch_topic 触发状态机
+                    if is_json_intent and self._ros2_mic and intent_data:
+                        self._ros2_mic.publish_business_intent(intent_data)
+                    # 自然语言：发布到 /chat_history
+                    elif not is_json_intent and self._ros2_mic:
                         self._ros2_mic.publish_chat_history(self.tts_text_buffer, speaker="ROBOT")
+                    
                     self.tts_text_buffer = ""
         elif response['message_type'] == 'SERVER_ERROR':
             print(f"服务器错误: {response['payload_msg']}")
@@ -271,6 +277,9 @@ class DialogSession:
                 continue
             text = self._ros2_mic.get_tts_text()
             if text:
+                # 清除 TTS 静音标志位，确保本次 TTS 正常播放
+                self.is_muting_tts = False
+                
                 if not self._tts_session_initialized:
                     # 首次 TTS：用 chat_text_query 激活会话，直接播报用户要 TTS 的文本
                     # 构造 prompt 让模型只复述文本，不产生额外回复
