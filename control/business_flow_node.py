@@ -110,9 +110,13 @@ class BusinessFlowNode(Node):
             self.get_logger().info(f"语音业务: business_type={business_type}, content={content}")
 
             if business_type == "query_balance":
-                # 查询余额，直接进入手机号输入页
+                # 查询余额，需要当前在 S0 状态
                 if self.current_state == BusinessState.S0_IDLE:
                     self.switch_state(BusinessState.S1_INPUT_PHONE)
+                else:
+                    # 不在首页，提示用户
+                    self.get_logger().warning(f"当前状态 {self.current_state} 无法办理新业务")
+                    self.pub_tts.publish(String(data="请先办理完当前业务或者退出哦"))
 
             elif business_type == "phone_number":
                 # 收到手机号，校验格式
