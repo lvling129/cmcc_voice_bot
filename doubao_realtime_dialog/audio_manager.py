@@ -203,8 +203,12 @@ class DialogSession:
             if event == 550:
                 content = payload_msg.get("content", "")
                 if content:
-                    # 检测是否以 "{" 开头（可能是 JSON 意图格式），立即停止 TTS
-                    if content.startswith("{"):
+                    self.tts_text_buffer += content
+                    
+                    # 检测累积文本是否以 "{" 开头（可能是 JSON 意图格式），立即停止 TTS
+                    # 使用 strip() 去除前导空白/换行符
+                    stripped_buffer = self.tts_text_buffer.strip()
+                    if stripped_buffer.startswith("{"):
                         # 设置 TTS 静音标志位，整个周期内禁止音频入队
                         self.is_muting_tts = True
                         # 清空音频队列，停止当前 TTS 播报
@@ -214,11 +218,10 @@ class DialogSession:
                             except queue.Empty:
                                 continue
                         print(f"[TTS 意图检测]: 检测到 JSON 开头，已停止当前 TTS 播报，静音整个周期")
-                    
-                    self.tts_text_buffer += content
 
             # TTS 结束（event 359），打印完整文本并发布到话题
             if event == 359:
+                print(f"[event 359] 收到 TTS 结束事件")
                 if self.tts_text_buffer:
                     print(f"[TTS 完整回复]: {self.tts_text_buffer}")
                     # 检测是否为 JSON 意图格式
@@ -237,12 +240,15 @@ class DialogSession:
                     
                     # JSON 意图：发布到 /touch_topic 触发状态机
                     if is_json_intent and self._ros2_mic and intent_data:
+                        print(f"[event 359] 发布业务意图: {intent_data}")
                         self._ros2_mic.publish_business_intent(intent_data)
                     # 自然语言：发布到 /chat_history
                     elif not is_json_intent and self._ros2_mic:
+                        print(f"[event 359] 发布聊天历史: {self.tts_text_buffer}")
                         self._ros2_mic.publish_chat_history(self.tts_text_buffer, speaker="ROBOT")
                     
                     self.tts_text_buffer = ""
+                print(f"[event 359] 处理完毕")
         elif response['message_type'] == 'SERVER_ERROR':
             print(f"服务器错误: {response['payload_msg']}")
             raise Exception("服务器错误")
@@ -250,18 +256,25 @@ class DialogSession:
     async def trigger_chat_tts_text(self, text: str):
         """发送ChatTTSText请求"""
         print(f"hit ChatTTSText event, start sending: {text}")
-        await self.client.chat_tts_text(
-            is_user_querying=self.is_user_querying,
-            start=True,
-            end=False,
-            content=text,
-        )
-        await self.client.chat_tts_text(
-            is_user_querying=self.is_user_querying,
-            start=False,
-            end=True,
-            content="",
-        )
+        try:
+            await self.client.chat_tts_text(
+                is_user_querying=self.is_user_querying,
+                start=True,
+                end=False,
+                content=text,
+            )
+            print(f"[chat_tts_text] start=True 发送成功")
+            await self.client.chat_tts_text(
+                is_user_querying=self.is_user_querying,
+                start=False,
+                end=True,
+                content="",
+            )
+            print(f"[chat_tts_text] end=True 发送成功")
+        except Exception as e:
+            print(f"[chat_tts_text] 发送失败: {e}")
+            import traceback
+            traceback.print_exc()
 
     async def trigger_chat_rag_text(self):
         await asyncio.sleep(5) # 模拟查询外部RAG的耗时，这里为了不影响GTA安抚话术的播报，直接sleep 5秒
@@ -311,7 +324,9 @@ class DialogSession:
     async def receive_loop(self):
         try:
             while True:
+                print(f"[receive_loop] 等待服务器响应...")
                 response = await self.client.receive_server_response()
+                print(f"[receive_loop] 收到响应: event={response.get('event', 'N/A')}")
                 self.handle_server_response(response)
                 if 'event' in response and (response['event'] == 152 or response['event'] == 153):
                     print(f"receive session finished event: {response['event']}")
@@ -333,9 +348,13 @@ class DialogSession:
             print("接收任务已取消")
         except Exception as e:
             print(f"接收消息错误: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
+            print("[receive_loop] 进入 finally，调用 stop()")
             self.stop()
             self.is_session_finished = True
+            print("[receive_loop] finally 执行完毕")
 
     async def process_audio_file(self) -> None:
         await self.process_audio_file_input(self.audio_file_path)

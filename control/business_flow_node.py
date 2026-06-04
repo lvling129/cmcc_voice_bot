@@ -12,7 +12,7 @@ class BusinessState:
     S4_VERIFYING      = "S4"   # 验证中
     S5_RESULT_SUCCESS = "S5"   # 业务办理成功
     S6_RESULT_FAIL    = "S6"   # 验证码验证失败
-    S7_PHONE_FAIL     = "S7"   # 手机号验证失败
+    S7_GENERAL_FAIL   = "S7"   # 通用失败（无法细分的错误）
 
 # 通用业务流程节点（可扩展所有业务）
 class BusinessFlowNode(Node):
@@ -33,6 +33,10 @@ class BusinessFlowNode(Node):
         # 语音业务缓存数据
         self.phone_number = ""
         self.sms_verify_code = ""
+        
+        # 话费查询结果缓存
+        self.balance = 0
+        self.account_expire_date = ""
 
         # 定时器引用（避免资源泄漏）
         self._state_timer = None
@@ -43,6 +47,11 @@ class BusinessFlowNode(Node):
     def switch_state(self, new_state):
         """通用状态切换（所有业务共用逻辑）"""
         old_state = self.current_state
+        
+        # 如果状态没有改变，不执行任何操作（避免重复发布）
+        if old_state == new_state:
+            return
+        
         self.current_state = new_state
 
         # 销毁旧定时器（避免资源泄漏）
@@ -65,7 +74,7 @@ class BusinessFlowNode(Node):
 
         if s == BusinessState.S0_IDLE:
             ui_page = "home"
-            tts_text = "请选择您要办理的业务"
+            tts_text = ""
 
         elif s == BusinessState.S1_INPUT_PHONE:
             ui_page = "phone_input"
@@ -86,19 +95,33 @@ class BusinessFlowNode(Node):
         elif s == BusinessState.S5_RESULT_SUCCESS:
             ui_page = "balance_result"
             tts_text = "已为您查询话费余额，请看屏幕"
+            # 构建 detail 字段
+            detail = json.dumps({
+                "phone_number": self.phone_number,
+                "balance": self.balance,
+                "account_expire_date": self.account_expire_date
+            }, ensure_ascii=False)
 
         elif s == BusinessState.S6_RESULT_FAIL:
             ui_page = "smscode_input"
             tts_text = "验证失败，请重新输入验证码"
 
-        elif s == BusinessState.S7_PHONE_FAIL:
-            ui_page = "phone_input"
-            tts_text = "手机号验证失败，请重新输入"
+        elif s == BusinessState.S7_GENERAL_FAIL:
+            ui_page = "error"
+            tts_text = "抱歉，系统暂时遇到问题，即将退出，请稍后重试"
+            # 5秒后自动返回首页
+            self._state_timer = self.create_timer(5.0, lambda: self.switch_state(BusinessState.S0_IDLE))
 
         # 执行
-        ui_data = json.dumps({"page": ui_page})
+        if s == BusinessState.S5_RESULT_SUCCESS:
+            # S5 状态需要发布 detail 字段
+            ui_data = json.dumps({"page": ui_page, "detail": detail})
+        else:
+            ui_data = json.dumps({"page": ui_page})
         self.pub_ui.publish(String(data=ui_data))
-        self.pub_tts.publish(String(data=tts_text))
+        # 只在有文本时才发布 TTS，避免重复播报
+        if tts_text:
+            self.pub_tts.publish(String(data=tts_text))
 
     def on_touch_topic(self, msg):
         """语音业务指令处理（/touch_topic）"""
@@ -150,9 +173,13 @@ class BusinessFlowNode(Node):
                     })))
                     self.switch_state(BusinessState.S4_VERIFYING)
 
-            # 返回首页
+            # 返回首页（统一播放提示音，只有不在 S0 时才切换状态）
             elif business_type == "back_home":
-                self.switch_state(BusinessState.S0_IDLE)
+                # 统一播放提示音
+                self.pub_tts.publish(String(data="好的，有需要再来找我哦"))
+                # 只有不在 S0 状态时才切换
+                if self.current_state != BusinessState.S0_IDLE:
+                    self.switch_state(BusinessState.S0_IDLE)
 
         except json.JSONDecodeError as e:
             self.get_logger().error(f"/touch_topic JSON 解析失败: {e}")
@@ -210,8 +237,8 @@ class BusinessFlowNode(Node):
             self.switch_state(BusinessState.S3_INPUT_CODE)
         else:
             self.get_logger().error(f"验证码发送失败: {message}")
-            self.pub_tts.publish(String(data=message))
-            self.switch_state(BusinessState.S7_PHONE_FAIL)
+            self.pub_tts.publish(String(data="验证码发送失败"))
+            self.switch_state(BusinessState.S7_GENERAL_FAIL)
             # 保存定时器引用，下次切换状态时会自动销毁
             self._state_timer = self.create_timer(2.0, lambda: self.switch_state(BusinessState.S1_INPUT_PHONE))
 
@@ -219,22 +246,29 @@ class BusinessFlowNode(Node):
         """处理验证码校验结果"""
         if code == 0:
             self.get_logger().info(f"验证码校验成功: {message}")
-            self.switch_state(BusinessState.S5_RESULT_SUCCESS)
+            # 验证码校验成功后，先不跳转状态，而是发送查询话费请求
+            self.get_logger().info(f"发送话费查询请求，手机号: {self.phone_number}")
+            self.pub_api.publish(String(data=json.dumps({
+                "func_name": "query_balance",
+                "params_json": json.dumps({"phone_number": self.phone_number})
+            })))
+            # 保持当前状态 S3，等待后端返回查询结果后再跳转
         else:
             self.get_logger().error(f"验证码校验失败: {message}")
-            self.pub_tts.publish(String(data=message))
+            self.pub_tts.publish(String(data="验证码校验失败"))
             self.switch_state(BusinessState.S6_RESULT_FAIL)
             self._state_timer = self.create_timer(2.0, lambda: self.switch_state(BusinessState.S3_INPUT_CODE))
 
     def _handle_query_balance_result(self, code, message, data_json):
         """处理话费查询结果"""
         if code == 0:
-            balance = data_json.get("balance", 0)
-            self.get_logger().info(f"话费查询成功: 余额 {balance} 元")
+            self.balance = data_json.get("balance", 0)
+            self.account_expire_date = data_json.get("account_expire_date", "")
+            self.get_logger().info(f"话费查询成功: 余额 {self.balance} 元，账户有效期 {self.account_expire_date}")
             self.switch_state(BusinessState.S5_RESULT_SUCCESS)
         else:
             self.get_logger().error(f"话费查询失败: {message}")
-            self.pub_tts.publish(String(data=message))
+            self.pub_tts.publish(String(data="话费查询失败"))
             self.switch_state(BusinessState.S6_RESULT_FAIL)
             self._state_timer = self.create_timer(2.0, lambda: self.switch_state(BusinessState.S0_IDLE))
 
