@@ -30,6 +30,7 @@ class BusinessFlowNode(Node):
 
         # 订阅
         self.create_subscription(String, "/touch_topic", self.on_touch_topic, 10)
+        self.create_subscription(String, "/voice_topic", self.on_touch_topic, 10)  # 语音输入，处理逻辑同 touch_topic
         self.create_subscription(String, "/api_response", self.on_api_response, 10)
 
         # 语音业务缓存数据
@@ -42,8 +43,13 @@ class BusinessFlowNode(Node):
         self.account_expire_date = ""
 
         # 套餐查询缓存
-        self.query_month = ""  # 用户输入的年月，如 "202606"
+        self.billCycle = ""  # 用户输入的年月，如 "202606"
         self.package_info = {}  # 套餐查询结果
+
+        # 手机号输入错误计数（连续输错3次以上提示用户）
+        self.phone_error_count = 0
+        # 验证码输入错误计数（连续输错3次以上提示用户）
+        self.verify_code_error_count = 0
 
         # 定时器引用（避免资源泄漏）
         self._state_timer = None
@@ -127,9 +133,9 @@ class BusinessFlowNode(Node):
             ui_page = "package_result"
             tts_text = "已为您查询套餐信息，请看屏幕"
             detail = json.dumps({
-                "phone_number": self.phone_number,
-                "query_month": self.query_month,
-                "package_info": self.package_info
+                "phone_number": self.package_info.get("phone_number", ""),
+                "billCycle": self.package_info.get("billCycle", ""),
+                "data_json": self.package_info.get("data_json", [])
             }, ensure_ascii=False)
 
         # 执行
@@ -144,7 +150,8 @@ class BusinessFlowNode(Node):
             self.pub_tts.publish(String(data=tts_text))
 
     def on_touch_topic(self, msg):
-        """语音业务指令处理（/touch_topic）"""
+        """语音业务指令处理（/voice_topic）"""
+        """触屏业务指令处理（/touch_topic）"""
         try:
             data = json.loads(msg.data)
             business_type = data.get("business_type", "")
@@ -173,8 +180,28 @@ class BusinessFlowNode(Node):
 
             elif business_type == "phone_number":
                 # 收到手机号，校验格式
-                if content and self.current_state == BusinessState.S1_INPUT_PHONE:
-                    if self._validate_phone_number(content):
+                if self.current_state == BusinessState.S1_INPUT_PHONE:
+                    # 1. 手机号为空
+                    if not content:
+                        self.phone_error_count += 1
+                        self.get_logger().warning("手机号为空")
+                        self.pub_tts.publish(String(data="请输入手机号码"))
+                        # 保持在 S1 状态，等待重新输入
+                    # 2. 连续3次以上输错
+                    elif self.phone_error_count >= 3:
+                        self.phone_error_count += 1
+                        self.get_logger().warning(f"连续 {self.phone_error_count} 次输错手机号")
+                        self.pub_tts.publish(String(data=f"你已经连续{self.phone_error_count}次输错手机号，请检查号码"))
+                        # 保持在 S1 状态，等待重新输入
+                    # 3. 手机号位数不对
+                    elif not self._validate_phone_number(content):
+                        self.phone_error_count += 1
+                        self.get_logger().error(f"手机号格式错误: {content}")
+                        self.pub_tts.publish(String(data="请输入正确的11位手机号码"))
+                        # 保持在 S1 状态，等待重新输入
+                    else:
+                        # 校验通过，重置错误计数
+                        self.phone_error_count = 0
                         self.phone_number = content
                         self.get_logger().info(f"手机号校验通过: {content}")
                         # 发布请求发送验证码（保持 S1，等 API 返回后再切到 S3，避免重复发布 smscode_input）
@@ -182,37 +209,53 @@ class BusinessFlowNode(Node):
                             "func_name": "send_verify_code",
                             "params_json": json.dumps({"phone_number": content})
                         })))
-                    else:
-                        self.get_logger().error(f"手机号格式错误: {content}")
-                        self.pub_tts.publish(String(data="手机号格式不正确，请重新输入"))
-                        # 保持在 S1 状态，等待重新输入
 
             elif business_type == "sms_verify_code":
-                # 收到验证码，发布到后端校验
-                if content and self.current_state == BusinessState.S3_INPUT_CODE:
-                    self.sms_verify_code = content
-                    self.get_logger().info(f"收到验证码，开始校验: {content}")
-                    # 发布验证码校验请求
-                    self.pub_api.publish(String(data=json.dumps({
-                        "func_name": "verify_code_check",
-                        "params_json": json.dumps({
-                            "phone_number": self.phone_number,
-                            "verify_code": content
-                        })
-                    })))
-                    self.switch_state(BusinessState.S4_VERIFYING)
+                # 收到验证码，校验后发布到后端校验
+                if self.current_state == BusinessState.S3_INPUT_CODE:
+                    # 1. 验证码为空
+                    if not content:
+                        self.verify_code_error_count += 1
+                        self.get_logger().warning("验证码为空")
+                        self.pub_tts.publish(String(data="请输入验证码"))
+                        # 保持在 S3 状态，等待重新输入
+                    # 2. 连续3次以上输错
+                    elif self.verify_code_error_count >= 3:
+                        self.verify_code_error_count += 1
+                        self.get_logger().warning(f"连续 {self.verify_code_error_count} 次输错验证码")
+                        self.pub_tts.publish(String(data="验证码错误次数过多，请稍后再试"))
+                        # 保持在 S3 状态，等待重新输入
+                    # 3. 验证码位数不对（应为6位）
+                    elif len(content) != 6 or not content.isdigit():
+                        self.verify_code_error_count += 1
+                        self.get_logger().error(f"验证码格式错误: {content}")
+                        self.pub_tts.publish(String(data="请输入6位验证码"))
+                        # 保持在 S3 状态，等待重新输入
+                    else:
+                        # 校验通过，发布到后端校验
+                        self.sms_verify_code = content
+                        self.get_logger().info(f"收到验证码，开始校验: {content}")
+                        # 发布验证码校验请求
+                        self.pub_api.publish(String(data=json.dumps({
+                            "func_name": "verify_code_check",
+                            "params_json": json.dumps({
+                                "phone_number": self.phone_number,
+                                "verify_code": content
+                            })
+                        })))
+                        self.switch_state(BusinessState.S4_VERIFYING)
 
-            elif business_type == "query_month":
+            elif business_type == "bill_cycle":
                 # 收到年月输入（查套餐流程）
                 if content and self.current_state == BusinessState.S8_INPUT_MONTH:
-                    self.query_month = content
+                    self.billCycle = content
                     self.get_logger().info(f"收到查询年月: {content}，开始查询套餐")
                     # 发送套餐查询请求
                     self.pub_api.publish(String(data=json.dumps({
                         "func_name": "query_package",
                         "params_json": json.dumps({
                             "phone_number": self.phone_number,
-                            "query_month": content
+                            "billCycle": content
                         })
                     })))
                     self.switch_state(BusinessState.S4_VERIFYING)
@@ -221,6 +264,9 @@ class BusinessFlowNode(Node):
             elif business_type == "back_home":
                 # 统一播放提示音
                 self.pub_tts.publish(String(data="有需要再来找我哦"))
+                # 重置错误计数
+                self.phone_error_count = 0
+                self.verify_code_error_count = 0
                 # 只有不在 S0 状态时才切换
                 if self.current_state != BusinessState.S0_IDLE:
                     self.switch_state(BusinessState.S0_IDLE)
@@ -292,6 +338,8 @@ class BusinessFlowNode(Node):
         """处理验证码校验结果"""
         if code == 0:
             self.get_logger().info(f"验证码校验成功: {message}")
+            # 校验成功，重置错误计数
+            self.verify_code_error_count = 0
             if self.current_business == "query_package":
                 # 查套餐流程：验证成功后进入年月输入页
                 self.get_logger().info("查套餐流程，进入年月输入页")
@@ -326,7 +374,11 @@ class BusinessFlowNode(Node):
     def _handle_query_package_result(self, code, message, data_json):
         """处理套餐查询结果"""
         if code == 0:
-            self.package_info = data_json.get("package_info", {})
+            self.package_info = {
+                "phone_number": data_json.get("servnumber", ""),
+                "billCycle": data_json.get("billCycle", ""),
+                "data_json": data_json.get("resources", [])
+            }
             self.get_logger().info(f"套餐查询成功: {self.package_info}")
             self.switch_state(BusinessState.S9_PACKAGE_RESULT)
         else:

@@ -35,6 +35,7 @@ class Ros2MicSource:
     DEFAULT_TOPIC = "/avvtn/mic_pcm"
     DEFAULT_TTS_TOPIC = "/doubao_tts"
     DEFAULT_CHAT_HISTORY_TOPIC = "/chat_history"
+    DEFAULT_VOICE_TOPIC = "/voice_topic"
     # 5 秒 16k S16LE 缓冲上限：16000 * 2 * 5 = 160000B
     DEFAULT_MAX_BUFFER_BYTES = 16000 * 2 * 5
 
@@ -65,8 +66,8 @@ class Ros2MicSource:
         # 聊天历史发布器
         self._pub_chat_history = None
         
-        # 业务意图发布器（/touch_topic）
-        self._pub_touch_topic = None
+        # 业务意图发布器（/voice_topic）
+        self._pub_voice_topic = None
 
     # -- 启动 / 停止 ---------------------------------------------------------
 
@@ -100,9 +101,9 @@ class Ros2MicSource:
         self._pub_chat_history = self._node.create_publisher(
             String, self.chat_history_topic, chat_history_qos)
         
-        # 发布 /touch_topic 话题（用于发送业务意图）
-        self._pub_touch_topic = self._node.create_publisher(
-            String, "/touch_topic", 10)
+        # 发布 /voice_topic 话题（用于发送业务意图）
+        self._pub_voice_topic = self._node.create_publisher(
+            String, "/voice_topic", 10)
 
         self._running = True
         self._spin_thread = threading.Thread(
@@ -168,12 +169,12 @@ class Ros2MicSource:
             self._node.get_logger().error(f"发布聊天历史失败: {e}")
     
     def publish_business_intent(self, intent_data: dict) -> None:
-        """发布业务意图到 /touch_topic 话题
+        """发布业务意图到 /voice_topic 话题
         
         Args:
             intent_data: 意图数据，例如 {"intent": "query_balance"}
         """
-        if self._pub_touch_topic is None or not self._node:
+        if self._pub_voice_topic is None or not self._node:
             return
         try:
             # 转换为 business_flow_node 期望的格式
@@ -182,8 +183,8 @@ class Ros2MicSource:
                 "business_type": intent,
                 "content": ""
             }, ensure_ascii=False)
-            self._pub_touch_topic.publish(String(data=msg_data))
-            self._node.get_logger().info(f"发布业务意图: {intent}")
+            self._pub_voice_topic.publish(String(data=msg_data))
+            self._node.get_logger().info(f"发布业务意图到 /voice_topic: {intent}")
         except Exception as e:
             self._node.get_logger().error(f"发布业务意图失败: {e}")
 
