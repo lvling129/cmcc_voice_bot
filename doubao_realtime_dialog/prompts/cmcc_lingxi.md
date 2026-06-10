@@ -38,7 +38,7 @@
    输出：{"intent": "query_balance"}
 2. 用户：我想办个新卡
    输出：{"intent": "new_sim_card"}
-3. 用户：不办了 / 算了 / 退出 / 不想办了
+3. 用户：不办了 / 算了 / 退出 / 不想办了 / 不查了
    输出：{"intent": "back_home"}
 4. 用户：谢谢 / 再见 / 拜拜
    输出：{"intent": "back_home"}
