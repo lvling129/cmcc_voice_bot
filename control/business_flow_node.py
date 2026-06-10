@@ -15,6 +15,7 @@ class BusinessState:
     S7_GENERAL_FAIL   = "S7"   # 通用失败（无法细分的错误）
     S8_INPUT_MONTH    = "S8"   # 年月输入页（查套餐用）
     S9_PACKAGE_RESULT = "S9"   # 套餐查询结果页
+    S10_CONFIRM_SWITCH = "S10" # 业务切换二次确认弹窗
 
 # 通用业务流程节点（可扩展所有业务）
 class BusinessFlowNode(Node):
@@ -50,6 +51,10 @@ class BusinessFlowNode(Node):
         self.phone_error_count = 0
         # 验证码输入错误计数（连续输错3次以上提示用户）
         self.verify_code_error_count = 0
+        # 待切换的业务类型（用于 S10 确认弹窗后执行）
+        self.pending_business = ""
+        # 弹窗前的状态（用于取消切换时恢复）
+        self.previous_state = BusinessState.S0_IDLE
 
         # 定时器引用（避免资源泄漏）
         self._state_timer = None
@@ -138,9 +143,20 @@ class BusinessFlowNode(Node):
                 "data_json": self.package_info.get("data_json", [])
             }, ensure_ascii=False)
 
+        elif s == BusinessState.S10_CONFIRM_SWITCH:
+            ui_page = "confirm_switch"
+            # 业务名称映射（用于 TTS 播报）
+            business_name_map = {
+                "query_balance": "查话费",
+                "query_package": "查套餐"
+            }
+            current_name = business_name_map.get(self.current_business, "未知")
+            tts_text = f"您当前正在{current_name}流程中，请问是放弃还是继续？"
+            detail = tts_text
+
         # 执行
-        if s in (BusinessState.S5_RESULT_SUCCESS, BusinessState.S9_PACKAGE_RESULT):
-            # S5/S9 状态需要发布 detail 字段
+        if s in (BusinessState.S5_RESULT_SUCCESS, BusinessState.S9_PACKAGE_RESULT, BusinessState.S10_CONFIRM_SWITCH):
+            # S5/S9/S10 状态需要发布 detail 字段
             ui_data = json.dumps({"page": ui_page, "detail": detail})
         else:
             ui_data = json.dumps({"page": ui_page})
@@ -164,36 +180,55 @@ class BusinessFlowNode(Node):
                 if self.current_state in (BusinessState.S0_IDLE, BusinessState.S5_RESULT_SUCCESS, BusinessState.S9_PACKAGE_RESULT):
                     self.current_business = "query_balance"
                     self.switch_state(BusinessState.S1_INPUT_PHONE)
+                elif self.current_business == "query_balance":
+                    # 新业务与当前业务相同，不弹窗，TTS提示
+                    self.get_logger().info("用户请求的业务与当前业务相同，不弹窗")
+                    self.pub_tts.publish(String(data="您当前已经在查话费流程中"))
+                elif self.current_state == BusinessState.S10_CONFIRM_SWITCH:
+                    # 已在弹窗状态，更新待切换业务即可，不重复弹窗
+                    self.pending_business = "query_balance"
+                    self.get_logger().info("已在弹窗状态，更新待切换业务为 query_balance")
                 else:
-                    # 不在首页，提示用户
-                    self.get_logger().warning(f"当前状态 {self.current_state} 无法办理新业务")
-                    self.pub_tts.publish(String(data="请先办理完当前业务或者退出哦"))
+                    # 不在首页，弹出二次确认弹窗
+                    self.pending_business = "query_balance"
+                    self.previous_state = self.current_state  # 保存弹窗前状态
+                    self.get_logger().warning(f"当前状态 {self.current_state} 无法直接办理新业务，弹出确认弹窗")
+                    self.switch_state(BusinessState.S10_CONFIRM_SWITCH)
 
             elif business_type == "query_package":
                 # 查询套餐，需要当前在 S0 或 S5 或 S9 状态
                 if self.current_state in (BusinessState.S0_IDLE, BusinessState.S5_RESULT_SUCCESS, BusinessState.S9_PACKAGE_RESULT):
                     self.current_business = "query_package"
                     self.switch_state(BusinessState.S1_INPUT_PHONE)
+                elif self.current_business == "query_package":
+                    # 新业务与当前业务相同，不弹窗，TTS提示
+                    self.get_logger().info("用户请求的业务与当前业务相同，不弹窗")
+                    self.pub_tts.publish(String(data="您当前已经在查套餐流程中"))
+                elif self.current_state == BusinessState.S10_CONFIRM_SWITCH:
+                    # 已在弹窗状态，更新待切换业务即可，不重复弹窗
+                    self.pending_business = "query_package"
+                    self.get_logger().info("已在弹窗状态，更新待切换业务为 query_package")
                 else:
-                    self.get_logger().warning(f"当前状态 {self.current_state} 无法办理新业务")
-                    self.pub_tts.publish(String(data="请先办理完当前业务或者退出哦"))
+                    # 不在首页，弹出二次确认弹窗
+                    self.pending_business = "query_package"
+                    self.previous_state = self.current_state  # 保存弹窗前状态
+                    self.get_logger().warning(f"当前状态 {self.current_state} 无法直接办理新业务，弹出确认弹窗")
+                    self.switch_state(BusinessState.S10_CONFIRM_SWITCH)
 
             elif business_type == "phone_number":
                 # 收到手机号，校验格式
                 if self.current_state == BusinessState.S1_INPUT_PHONE:
+                    # 连续3次以上输错，播放提示音，但仍继续校验
+                    if self.phone_error_count >= 3:
+                        self.get_logger().warning(f"连续 {self.phone_error_count} 次输错手机号")
+                        self.pub_tts.publish(String(data=f"你已经连续{self.phone_error_count}次输错手机号"))
                     # 1. 手机号为空
                     if not content:
                         self.phone_error_count += 1
                         self.get_logger().warning("手机号为空")
                         self.pub_tts.publish(String(data="请输入手机号码"))
                         # 保持在 S1 状态，等待重新输入
-                    # 2. 连续3次以上输错
-                    elif self.phone_error_count >= 3:
-                        self.phone_error_count += 1
-                        self.get_logger().warning(f"连续 {self.phone_error_count} 次输错手机号")
-                        self.pub_tts.publish(String(data=f"你已经连续{self.phone_error_count}次输错手机号，请检查号码"))
-                        # 保持在 S1 状态，等待重新输入
-                    # 3. 手机号位数不对
+                    # 2. 手机号位数不对
                     elif not self._validate_phone_number(content):
                         self.phone_error_count += 1
                         self.get_logger().error(f"手机号格式错误: {content}")
@@ -213,19 +248,17 @@ class BusinessFlowNode(Node):
             elif business_type == "sms_verify_code":
                 # 收到验证码，校验后发布到后端校验
                 if self.current_state == BusinessState.S3_INPUT_CODE:
+                    # 连续3次以上输错，播放提示音，但仍继续校验
+                    if self.verify_code_error_count >= 3:
+                        self.get_logger().warning(f"连续 {self.verify_code_error_count} 次输错验证码")
+                        self.pub_tts.publish(String(data="验证码错误次数过多，请稍后再试"))
                     # 1. 验证码为空
                     if not content:
                         self.verify_code_error_count += 1
                         self.get_logger().warning("验证码为空")
                         self.pub_tts.publish(String(data="请输入验证码"))
                         # 保持在 S3 状态，等待重新输入
-                    # 2. 连续3次以上输错
-                    elif self.verify_code_error_count >= 3:
-                        self.verify_code_error_count += 1
-                        self.get_logger().warning(f"连续 {self.verify_code_error_count} 次输错验证码")
-                        self.pub_tts.publish(String(data="验证码错误次数过多，请稍后再试"))
-                        # 保持在 S3 状态，等待重新输入
-                    # 3. 验证码位数不对（应为6位）
+                    # 2. 验证码位数不对（应为6位）
                     elif len(content) != 6 or not content.isdigit():
                         self.verify_code_error_count += 1
                         self.get_logger().error(f"验证码格式错误: {content}")
@@ -260,13 +293,35 @@ class BusinessFlowNode(Node):
                     })))
                     self.switch_state(BusinessState.S4_VERIFYING)
 
+            # 业务切换确认弹窗的用户选择（触屏）
+            elif business_type == "interrupt_choice":
+                if self.current_state != BusinessState.S10_CONFIRM_SWITCH:
+                    return
+                choice = content  # "continue" 或 "quit"
+                if choice == "quit":
+                    self._do_quit_current()
+                else:
+                    self._do_continue_current()
+
+            # 业务切换确认弹窗的用户选择（语音 - 继续）
+            elif business_type == "continue_current":
+                if self.current_state != BusinessState.S10_CONFIRM_SWITCH:
+                    return
+                self._do_continue_current()
+
             # 返回首页（统一播放提示音，只有不在 S0 时才切换状态）
             elif business_type == "back_home":
+                # S10 弹窗确认状态下收到 back_home，视为用户选择放弃当前业务、切换到新业务
+                if self.current_state == BusinessState.S10_CONFIRM_SWITCH:
+                    self.get_logger().info("S10 弹窗收到 back_home，用户选择切换到新业务")
+                    self._do_quit_current()
+                    return
                 # 统一播放提示音
                 self.pub_tts.publish(String(data="有需要再来找我哦"))
-                # 重置错误计数
+                # 重置错误计数和待切换业务
                 self.phone_error_count = 0
                 self.verify_code_error_count = 0
+                self.pending_business = ""
                 # 只有不在 S0 状态时才切换
                 if self.current_state != BusinessState.S0_IDLE:
                     self.switch_state(BusinessState.S0_IDLE)
@@ -287,6 +342,23 @@ class BusinessFlowNode(Node):
         if not phone.isdigit():
             return False
         return True
+
+    def _do_continue_current(self):
+        """用户选择继续当前业务，返回弹窗前的页面"""
+        self.get_logger().info(f"用户选择继续当前业务，返回弹窗前状态: {self.previous_state}")
+        self.pending_business = ""
+        self.switch_state(self.previous_state)
+
+    def _do_quit_current(self):
+        """用户选择放弃当前业务，切换到新业务"""
+        self.get_logger().info(f"用户确认切换到新业务: {self.pending_business}")
+        # 重置错误计数
+        self.phone_error_count = 0
+        self.verify_code_error_count = 0
+        # 切换到新业务
+        self.current_business = self.pending_business
+        self.pending_business = ""
+        self.switch_state(BusinessState.S1_INPUT_PHONE)
 
     def on_api_response(self, msg):
         """统一接收 API 调用返回结果"""
@@ -324,6 +396,10 @@ class BusinessFlowNode(Node):
 
     def _handle_send_verify_code_result(self, code, message, data_json):
         """处理发送验证码结果"""
+        # 状态守卫：只有在 S1（等待验证码发送结果）时才处理
+        if self.current_state != BusinessState.S1_INPUT_PHONE:
+            self.get_logger().warning(f"收到 send_verify_code 响应但当前状态为 {self.current_state}，忽略")
+            return
         if code == 0:
             self.get_logger().info(f"验证码发送成功: {message}")
             self.switch_state(BusinessState.S3_INPUT_CODE)
@@ -336,6 +412,10 @@ class BusinessFlowNode(Node):
 
     def _handle_verify_code_result(self, code, message, data_json):
         """处理验证码校验结果"""
+        # 状态守卫：只有在 S4（验证中）时才处理
+        if self.current_state != BusinessState.S4_VERIFYING:
+            self.get_logger().warning(f"收到 verify_code_check 响应但当前状态为 {self.current_state}，忽略")
+            return
         if code == 0:
             self.get_logger().info(f"验证码校验成功: {message}")
             # 校验成功，重置错误计数
@@ -360,6 +440,10 @@ class BusinessFlowNode(Node):
 
     def _handle_query_balance_result(self, code, message, data_json):
         """处理话费查询结果"""
+        # 状态守卫：只有在 S4（验证中/查询中）时才处理
+        if self.current_state != BusinessState.S4_VERIFYING:
+            self.get_logger().warning(f"收到 query_balance 响应但当前状态为 {self.current_state}，忽略")
+            return
         if code == 0:
             self.balance = data_json.get("balance", 0)
             self.account_expire_date = data_json.get("account_expire_date", "")
@@ -373,6 +457,10 @@ class BusinessFlowNode(Node):
 
     def _handle_query_package_result(self, code, message, data_json):
         """处理套餐查询结果"""
+        # 状态守卫：只有在 S4（验证中/查询中）时才处理
+        if self.current_state != BusinessState.S4_VERIFYING:
+            self.get_logger().warning(f"收到 query_package 响应但当前状态为 {self.current_state}，忽略")
+            return
         if code == 0:
             self.package_info = {
                 "phone_number": data_json.get("servnumber", ""),

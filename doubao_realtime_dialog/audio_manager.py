@@ -101,6 +101,8 @@ class DialogSession:
         self.tts_text_buffer = ""  # 累积 TTS 文本
 
         self.audio_queue = queue.Queue()
+        self._tts_lock = asyncio.Lock()  # TTS 请求串行化锁
+        self._pending_tasks: list = []  # 跟踪所有 asyncio task，用于 stop 时取消
         if not self.is_audio_file_input:
             self.audio_device = AudioDeviceManager(
                 AudioConfig(**config.input_audio_config),
@@ -282,7 +284,13 @@ class DialogSession:
         await self.client.chat_rag_text(self.is_user_querying, external_rag='[{"title":"北京天气","content":"今天北京整体以晴到多云为主，但西部和北部地带可能会出现分散性雷阵雨，特别是午后至傍晚时段需注意突发降雨。\n💨 风况与湿度\n风力较弱，一般为 2–3 级南风或西南风\n白天湿度较高，早晚略凉爽"}]')
 
     async def _tts_topic_loop(self):
-        """轮询 /doubao_tts 话题队列，收到文本后发送给大模型做 TTS"""
+        """轮询 /doubao_tts 话题队列，收到文本后发送给大模型做 TTS
+        
+        关键优化：
+        1. 使用 asyncio.Lock 串行化 TTS 请求，避免并发冲突
+        2. 发送前清空队列中的旧消息，只发最新的一条
+        3. 等待服务器当前 TTS 播报结束后再发下一条
+        """
         self._tts_session_initialized = False
         while self.is_running:
             if self._ros2_mic is None:
@@ -290,20 +298,40 @@ class DialogSession:
                 continue
             text = self._ros2_mic.get_tts_text()
             if text:
-                # 清除 TTS 静音标志位，确保本次 TTS 正常播放
-                self.is_muting_tts = False
+                # 如果队列中还有更新的消息，取最后一条，丢弃中间的
+                latest_text = text
+                while True:
+                    next_text = self._ros2_mic.get_tts_text()
+                    if next_text is None:
+                        break
+                    latest_text = next_text
                 
-                if not self._tts_session_initialized:
-                    # 首次 TTS：用 chat_text_query 激活会话，直接播报用户要 TTS 的文本
-                    # 构造 prompt 让模型只复述文本，不产生额外回复
-                    query_text = f"请直接播报以下内容，不要添加任何其他内容：{text}"
-                    print(f"[doubao_tts] 首次 TTS，激活会话并播报: {text}")
-                    await self.client.chat_text_query(query_text)
-                    self._tts_session_initialized = True
-                else:
-                    # 后续 TTS：用 chat_tts_text 直接合成
-                    print(f"[doubao_tts] 发送 TTS: {text}")
-                    await self.trigger_chat_tts_text(text)
+                # 串行化：等待上一次 TTS 完成后再发
+                async with self._tts_lock:
+                    if not self.is_running:
+                        break
+                    # 清除 TTS 静音标志位，确保本次 TTS 正常播放
+                    self.is_muting_tts = False
+                    
+                    try:
+                        if not self._tts_session_initialized:
+                            # 首次 TTS：用 chat_text_query 激活会话
+                            query_text = f"请直接播报以下内容，不要添加任何其他内容：{latest_text}"
+                            print(f"[doubao_tts] 首次 TTS，激活会话并播报: {latest_text}")
+                            await self.client.chat_text_query(query_text)
+                            self._tts_session_initialized = True
+                        else:
+                            # 后续 TTS：用 chat_tts_text 直接合成
+                            print(f"[doubao_tts] 发送 TTS: {latest_text}")
+                            await self.trigger_chat_tts_text(latest_text)
+                        
+                        # 等待服务端 TTS 播报完成（event 359）后再处理下一条
+                        # 通过 sleep 等待一小段时间，确保服务端有时间处理
+                        await asyncio.sleep(0.3)
+                    except Exception as e:
+                        print(f"[doubao_tts] TTS 发送失败: {e}")
+                        import traceback
+                        traceback.print_exc()
             else:
                 await asyncio.sleep(0.1)
 
@@ -315,11 +343,27 @@ class DialogSession:
         """异步停止（用于 asyncio 信号处理）"""
         print(f"receive keyboard Ctrl+C")
         self.stop()
+        # 强制关闭 WebSocket 连接，解除悬挂的 await
+        await self._force_close_ws()
 
     def stop(self):
         self.is_recording = False
         self.is_playing = False
         self.is_running = False
+        # 取消所有跟踪的 asyncio 任务
+        for task in self._pending_tasks:
+            if not task.done():
+                task.cancel()
+        self._pending_tasks.clear()
+
+    async def _force_close_ws(self):
+        """强制关闭 WebSocket 连接，解除 receive_loop / trigger_chat_tts_text 的悬挂"""
+        try:
+            if self.client and self.client.ws:
+                await self.client.ws.close()
+                print("[stop] WebSocket 已强制关闭")
+        except Exception as e:
+            print(f"[stop] 关闭 WebSocket 异常: {e}")
 
     async def receive_loop(self):
         try:
@@ -462,7 +506,7 @@ class DialogSession:
             print("[豆包] mic-source=ros2，等待 /avvtn/mic_pcm 数据...")
 
             # 启动 TTS 话题轮询任务（复用 Ros2MicSource 节点的 TTS 队列）
-            asyncio.create_task(self._tts_topic_loop())
+            self._pending_tasks.append(asyncio.create_task(self._tts_topic_loop()))
 
             while self.is_recording:
                 try:
@@ -502,17 +546,17 @@ class DialogSession:
             await self.client.connect()
 
             if self.mod == "text":
-                asyncio.create_task(self.process_text_input())
-                asyncio.create_task(self.receive_loop())
+                self._pending_tasks.append(asyncio.create_task(self.process_text_input()))
+                self._pending_tasks.append(asyncio.create_task(self.receive_loop()))
                 while self.is_running:
                     await asyncio.sleep(0.1)
             else:
                 if self.is_audio_file_input:
-                    asyncio.create_task(self.process_audio_file())
+                    self._pending_tasks.append(asyncio.create_task(self.process_audio_file()))
                     await self.receive_loop()
                 else:
-                    asyncio.create_task(self.process_microphone_input())
-                    asyncio.create_task(self.receive_loop())
+                    self._pending_tasks.append(asyncio.create_task(self.process_microphone_input()))
+                    self._pending_tasks.append(asyncio.create_task(self.receive_loop()))
                     while self.is_running:
                         await asyncio.sleep(0.1)
 
