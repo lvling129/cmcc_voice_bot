@@ -335,6 +335,27 @@ class DialogSession:
             else:
                 await asyncio.sleep(0.1)
 
+    async def _subtitle_query_loop(self):
+        """轮询 /voiceprint/subtitle 字幕队列，收到 VAD 结束的完整句子后
+        通过 chat_text_query 发送给豆包大模型进行对话"""
+        print("[subtitle] _subtitle_query_loop 已启动")
+        while self.is_running:
+            if self._ros2_mic is None:
+                await asyncio.sleep(0.1)
+                continue
+            text = self._ros2_mic.get_subtitle_text()
+            if text:
+                try:
+                    print(f"[subtitle] 从队列取出字幕文本: {text}")
+                    await self.client.chat_text_query(text)
+                    print(f"[subtitle] chat_text_query 发送完成: {text}")
+                except Exception as e:
+                    print(f"[subtitle] chat_text_query 发送失败: {e}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                await asyncio.sleep(0.1)
+
     def _keyboard_signal(self, sig, frame):
         print(f"receive keyboard Ctrl+C")
         self.stop()
@@ -507,6 +528,9 @@ class DialogSession:
 
             # 启动 TTS 话题轮询任务（复用 Ros2MicSource 节点的 TTS 队列）
             self._pending_tasks.append(asyncio.create_task(self._tts_topic_loop()))
+
+            # 启动字幕文本轮询任务（/voiceprint/subtitle VAD 结束后发给豆包）
+            self._pending_tasks.append(asyncio.create_task(self._subtitle_query_loop()))
 
             while self.is_recording:
                 try:

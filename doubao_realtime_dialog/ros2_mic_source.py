@@ -36,6 +36,7 @@ class Ros2MicSource:
     DEFAULT_TTS_TOPIC = "/doubao_tts"
     DEFAULT_CHAT_HISTORY_TOPIC = "/chat_history"
     DEFAULT_VOICE_TOPIC = "/voice_topic"
+    DEFAULT_SUBTITLE_TOPIC = "/voiceprint/subtitle"
     # 5 秒 16k S16LE 缓冲上限：16000 * 2 * 5 = 160000B
     DEFAULT_MAX_BUFFER_BYTES = 16000 * 2 * 5
 
@@ -57,6 +58,9 @@ class Ros2MicSource:
 
         # TTS 文本队列（线程安全）
         self._tts_queue: Queue = Queue()
+
+        # 字幕文本队列（VAD 结束后的完整句子，线程安全）
+        self._subtitle_queue: Queue = Queue()
 
         self._node: Optional[Node] = None
         self._executor = None
@@ -91,6 +95,10 @@ class Ros2MicSource:
         self._node.create_subscription(
             String, self.tts_topic, self._on_tts_text, 10)
 
+        # 订阅 /voiceprint/subtitle 话题（用于接收 VAD 字幕文本）
+        self._node.create_subscription(
+            String, self.DEFAULT_SUBTITLE_TOPIC, self._on_subtitle, 10)
+
         # 发布 /chat_history 话题（用于发送 ASR 识别结果）
         chat_history_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -111,7 +119,7 @@ class Ros2MicSource:
         self._spin_thread.start()
 
         self._node.get_logger().info(
-            f"ROS2 mic source 已启动，订阅 topic={self.topic}, tts_topic={self.tts_topic}")
+            f"ROS2 mic source 已启动，订阅 topic={self.topic}, tts_topic={self.tts_topic}, subtitle_topic={self.DEFAULT_SUBTITLE_TOPIC}")
 
     def stop(self) -> None:
         """停止节点和 spin 线程，唤醒任何阻塞的 read"""
@@ -146,6 +154,28 @@ class Ros2MicSource:
         """非阻塞获取一条 TTS 文本，无数据时返回 None"""
         try:
             return self._tts_queue.get_nowait()
+        except Empty:
+            return None
+
+    # -- 字幕回调 -------------------------------------------------------------
+
+    def _on_subtitle(self, msg: String) -> None:
+        print(f"[ros2_mic_source] 收到 /voiceprint/subtitle 话题消息")
+        """收到 /voiceprint/subtitle 话题消息，VAD 结束时将完整句子放入队列"""
+        try:
+            data = json.loads(msg.data)
+            text = data.get("text", "").strip()
+            end = data.get("end", False)
+            if end and text:
+                print(f"[ros2_mic_source] 字幕 VAD 结束: {text}")
+                self._subtitle_queue.put(text)
+        except json.JSONDecodeError as e:
+            print(f"[ros2_mic_source] 字幕 JSON 解析失败: {e}")
+
+    def get_subtitle_text(self) -> Optional[str]:
+        """非阻塞获取一条 VAD 结束的字幕文本，无数据时返回 None"""
+        try:
+            return self._subtitle_queue.get_nowait()
         except Empty:
             return None
     
