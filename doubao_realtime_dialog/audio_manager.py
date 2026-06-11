@@ -97,6 +97,7 @@ class DialogSession:
         self.is_user_querying = False
         self.is_sending_chat_tts_text = False
         self.is_muting_tts = False  # TTS 静音标志位（JSON 意图周期内禁止播放）
+        self._tts_from_external_source = False  # 标记当前 TTS 周期是否来自外部 /doubao_tts（避免重复记录 chat_history）
         self.audio_buffer = b''
         self.tts_text_buffer = ""  # 累积 TTS 文本
 
@@ -167,6 +168,7 @@ class DialogSession:
                 self.is_user_querying = True
                 self.tts_text_buffer = ""  # 清空 TTS 文本缓存
                 self.is_muting_tts = False  # 重置 TTS 静音标志位
+                self._tts_from_external_source = False  # 重置外部 TTS 标志
 
             # ASR 识别结果（流式，event 451）
             if event == 451:
@@ -244,8 +246,8 @@ class DialogSession:
                     if is_json_intent and self._ros2_mic and intent_data:
                         print(f"[event 359] 发布业务意图: {intent_data}")
                         self._ros2_mic.publish_business_intent(intent_data)
-                    # 自然语言：发布到 /chat_history
-                    elif not is_json_intent and self._ros2_mic:
+                    # 自然语言：发布到 /chat_history（外部 TTS 已在 _tts_topic_loop 记录，跳过）
+                    elif not is_json_intent and self._ros2_mic and not self._tts_from_external_source:
                         print(f"[event 359] 发布聊天历史: {self.tts_text_buffer}")
                         self._ros2_mic.publish_chat_history(self.tts_text_buffer, speaker="ROBOT")
                     
@@ -314,6 +316,11 @@ class DialogSession:
                     self.is_muting_tts = False
                     
                     try:
+                        # 标记为外部 TTS，记录到 /chat_history
+                        self._tts_from_external_source = True
+                        if self._ros2_mic:
+                            self._ros2_mic.publish_chat_history(latest_text, speaker="ROBOT")
+                        
                         if not self._tts_session_initialized:
                             # 首次 TTS：用 chat_text_query 激活会话
                             query_text = f"请直接播报以下内容，不要添加任何其他内容：{latest_text}"
@@ -347,6 +354,14 @@ class DialogSession:
             if text:
                 try:
                     print(f"[subtitle] 从队列取出字幕文本: {text}")
+                    # 打断当前正在播放的 TTS 音频
+                    while not self.audio_queue.empty():
+                        try:
+                            self.audio_queue.get_nowait()
+                        except queue.Empty:
+                            break
+                    # 发送前先发布到 /chat_history 记录用户输入
+                    self._ros2_mic.publish_chat_history(text, speaker="PERSON")
                     await self.client.chat_text_query(text)
                     print(f"[subtitle] chat_text_query 发送完成: {text}")
                 except Exception as e:
