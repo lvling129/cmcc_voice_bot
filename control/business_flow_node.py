@@ -215,6 +215,11 @@ class BusinessFlowNode(Node):
                     self.get_logger().warning(f"当前状态 {self.current_state} 无法直接办理新业务，弹出确认弹窗")
                     self.switch_state(BusinessState.S10_CONFIRM_SWITCH)
 
+            elif business_type in ("query_traffic", "new_sim_card"):
+                # 暂未开放的业务，语音提示后不做任何操作
+                self.get_logger().info(f"业务 {business_type} 暂未开放")
+                self.pub_tts.publish(String(data="当前暂时不支持该业务哦，敬请期待"))
+
             elif business_type == "phone_number":
                 # 收到手机号，校验格式
                 if self.current_state == BusinessState.S1_INPUT_PHONE:

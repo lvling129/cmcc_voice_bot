@@ -247,7 +247,7 @@ class DialogSession:
                         print(f"[event 359] 发布业务意图: {intent_data}")
                         self._ros2_mic.publish_business_intent(intent_data)
                     # 自然语言：发布到 /chat_history（外部 TTS 已在 _tts_topic_loop 记录，跳过）
-                    elif not is_json_intent and self._ros2_mic and not self._tts_from_external_source:
+                    elif not is_json_intent and self._ros2_mic:
                         print(f"[event 359] 发布聊天历史: {self.tts_text_buffer}")
                         self._ros2_mic.publish_chat_history(self.tts_text_buffer, speaker="ROBOT")
                     
