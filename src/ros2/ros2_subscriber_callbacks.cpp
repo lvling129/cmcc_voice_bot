@@ -1,5 +1,6 @@
 #include "ros2_subscriber_callbacks.hpp"
 #include "utils/Logger.hpp"
+#include "utils/json.hpp"
 #include <iostream>
 #include "avvtn_capture/avvtn_capture.h"
 
@@ -34,5 +35,22 @@ void TouchWakeupCallback(const std_msgs::msg::String::SharedPtr msg)
         AvvtnCapture::getInstance()->handleTouchWake();
     } else {
         LOG_ERROR("AvvtnCapture 实例为空，无法处理触摸唤醒");
+    }
+}
+
+void VoiceprintSwitcherCallback(const std_msgs::msg::String::SharedPtr msg)
+{
+    LOG_INFO("收到声纹降噪开关: {%s}", msg->data.c_str());
+    try {
+        auto json = nlohmann::json::parse(msg->data);
+        bool status = json.value("status", false);
+        if (AvvtnCapture::getInstance()) {
+            AvvtnCapture::getInstance()->setVoiceprintActive(status);
+            LOG_INFO("声纹降噪开关已设为: %s", status ? "true(跳过PCM)" : "false(正常发送)");
+        } else {
+            LOG_ERROR("AvvtnCapture 实例为空，无法设置声纹开关");
+        }
+    } catch (const nlohmann::json::exception& e) {
+        LOG_ERROR("声纹开关 JSON 解析失败: %s", e.what());
     }
 }
