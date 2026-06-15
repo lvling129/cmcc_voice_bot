@@ -28,6 +28,7 @@ class BusinessFlowNode(Node):
         self.pub_tts = self.create_publisher(String, "/doubao_tts", 10)
         self.pub_state = self.create_publisher(String, "/current_state", 10)
         self.pub_api = self.create_publisher(String, "/api_request", 10)
+        self.pub_sleep = self.create_publisher(String, "/avvtn_sleep", 10)
 
         # 订阅
         self.create_subscription(String, "/touch_topic", self.on_touch_topic, 10)
@@ -66,8 +67,8 @@ class BusinessFlowNode(Node):
         """通用状态切换（所有业务共用逻辑）"""
         old_state = self.current_state
         
-        # 如果状态没有改变，不执行任何操作（避免重复发布）
-        if old_state == new_state:
+        # 如果状态没有改变，不执行任何操作（避免重复发布），但 S0 除外（需要强制刷新）
+        if old_state == new_state and new_state != BusinessState.S0_IDLE:
             return
         
         self.current_state = new_state
@@ -327,9 +328,9 @@ class BusinessFlowNode(Node):
                 self.phone_error_count = 0
                 self.verify_code_error_count = 0
                 self.pending_business = ""
-                # 只有不在 S0 状态时才切换
-                if self.current_state != BusinessState.S0_IDLE:
-                    self.switch_state(BusinessState.S0_IDLE)
+                self.switch_state(BusinessState.S0_IDLE)
+                self.pub_sleep.publish(String(data="sleep"))
+                
 
         except json.JSONDecodeError as e:
             self.get_logger().error(f"/touch_topic JSON 解析失败: {e}")

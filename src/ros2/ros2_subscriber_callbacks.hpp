@@ -34,6 +34,14 @@ void TouchWakeupCallback(const std_msgs::msg::String::SharedPtr msg);
  */
 void VoiceprintSwitcherCallback(const std_msgs::msg::String::SharedPtr msg);
 
+/**
+ * @brief AVVTN休眠话题回调
+ * @param msg 话题消息
+ * @note 话题名: /avvtn_sleep
+ *       收到消息后将 is_sleeping 设为 true
+ */
+void AvvtnSleepCallback(const std_msgs::msg::String::SharedPtr msg);
+
 // 在此处添加更多订阅回调的声明，例如：
 // void onCommand(const std_msgs::msg::String::SharedPtr msg);
 // void onConfigUpdate(const std_msgs::msg::String::SharedPtr msg);

@@ -76,6 +76,12 @@ public:
     void setVoiceprintActive(bool active) { is_voiceprint_active_ = active; }
 
     /**
+     * @brief 设置休眠状态
+     * @param sleeping true=进入休眠，false=唤醒
+     */
+    void setSleeping(bool sleeping) { is_sleeping = sleeping; }
+
+    /**
      * @brief 测试设置beam
      * @param beam_id beamID
      * @return 0表示成功，非0表示失败

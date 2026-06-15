@@ -54,3 +54,14 @@ void VoiceprintSwitcherCallback(const std_msgs::msg::String::SharedPtr msg)
         LOG_ERROR("声纹开关 JSON 解析失败: %s", e.what());
     }
 }
+
+void AvvtnSleepCallback(const std_msgs::msg::String::SharedPtr msg)
+{
+    LOG_INFO("收到AVVTN休眠话题: {%s}", msg->data.c_str());
+    if (AvvtnCapture::getInstance()) {
+        AvvtnCapture::getInstance()->setSleeping(true);
+        LOG_INFO("is_sleeping 已设为 true");
+    } else {
+        LOG_ERROR("AvvtnCapture 实例为空，无法设置休眠状态");
+    }
+}
