@@ -428,9 +428,12 @@ class DialogSession:
 
     async def receive_loop(self):
         try:
-            while True:
+            while self.is_running:
                 print(f"[receive_loop] 等待服务器响应...")
                 response = await self.client.receive_server_response()
+                if not response:
+                    # 超时返回空 dict，继续等待
+                    continue
                 print(f"[receive_loop] 收到响应: event={response.get('event', 'N/A')}")
                 self.handle_server_response(response)
                 if 'event' in response and (response['event'] == 152 or response['event'] == 153):
@@ -456,8 +459,7 @@ class DialogSession:
             import traceback
             traceback.print_exc()
         finally:
-            print("[receive_loop] 进入 finally，调用 stop()")
-            self.stop()
+            print("[receive_loop] 进入 finally")
             self.is_session_finished = True
             print("[receive_loop] finally 执行完毕")
 

@@ -372,6 +372,7 @@ void AvvtnCapture::handleFaceRecognition(avvtn_callback_data_t *data_p)
 
 void AvvtnCapture::handleAudioWake(avvtn_callback_data_t *data_p)
 {
+    // 唤醒会触发两次handleAudioWake，先wakeup后wakeup_detail
     std::string wake_str = std::string((char *)data_p->data, data_p->data_size);
     LOG_INFO("AVVTN接收到唤醒语音: %s", wake_str.c_str());
 
@@ -384,36 +385,12 @@ void AvvtnCapture::handleAudioWake(avvtn_callback_data_t *data_p)
     //aiui_wrapper_.ResetWakeup();
     is_sleeping = false;
 
-    /* 两次唤醒只发送一次wakeup给AIUI */
-    std::string msg_type;
-    try {
-        // 解析 JSON
-        auto root = nlohmann::json::parse(wake_str);
-        // 提取 msg_type 字段
-        msg_type = root["msg_type"];
-        // 输出结果
-        std::cout << "msg_type: " << msg_type << std::endl;
-    } catch (nlohmann::json::exception& e) {
-        std::cerr << "JSON解析错误: " << e.what() << std::endl;
-        LOG_ERROR("JSON解析错误");
-    }
-    if(msg_type == "wakeup_detail")
-    {
-        LOG_INFO("带角度的语音唤醒不发送wakeup给AIUI");
-        return;
-    }
+    // 发布唤醒事件到 /voice_wakeup 话题
+    ROSManager::getInstance().publishVoiceWakeup(wake_str);
 
-    // 可以设置多种唤醒方式 比如 需要语音唤醒 或者 只需要人脸唤醒 当前默认使用语音唤醒
-    if (wake_mode_ == "ivw")
-    {
-        // 发布唤醒事件到 /voice_wakeup 话题
-        ROSManager::getInstance().publishVoiceWakeup(wake_str);
+    // 发布文本“灵犀灵犀”到 /doubao_chat_text_query，触发豆包大模型对话
+    ROSManager::getInstance().publishDoubaoChatQuery("灵犀灵犀");
 
-        // 发布文本“灵犀灵犀”到 /doubao_chat_text_query，触发豆包大模型对话
-        ROSManager::getInstance().publishDoubaoChatQuery("灵犀灵犀");
-
-        //aiui_wrapper_.Wakeup();
-    }
     std::cout << "接收到唤醒事件: " << wake_str << std::endl;
     return;
 }

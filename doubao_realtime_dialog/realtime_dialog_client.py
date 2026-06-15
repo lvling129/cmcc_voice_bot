@@ -1,3 +1,4 @@
+import asyncio
 import gzip
 import json
 from typing import Dict, Any
@@ -156,11 +157,14 @@ class RealtimeDialogClient:
         task_request.extend(payload_bytes)
         await self.ws.send(task_request)
 
-    async def receive_server_response(self) -> Dict[str, Any]:
+    async def receive_server_response(self, timeout: float = 30.0) -> Dict[str, Any]:
         try:
-            response = await self.ws.recv()
+            response = await asyncio.wait_for(self.ws.recv(), timeout=timeout)
             data = protocol.parse_response(response)
             return data
+        except asyncio.TimeoutError:
+            # 超时不代表错误，返回空 dict 让调用方 continue
+            return {}
         except Exception as e:
             raise Exception(f"Failed to receive message: {e}")
 
