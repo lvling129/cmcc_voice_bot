@@ -25,6 +25,9 @@ void ROSManager::init(int argc, char const *argv[]) {
         // 语音唤醒发布器（无人服务厅）
         voice_wakeup_publisher_ = node_->create_publisher<std_msgs::msg::String>("voice_wake_topic", 10);
 
+        // 豆包对话查询发布器（唤醒后发送文本给豆包）
+        doubao_chat_query_publisher_ = node_->create_publisher<std_msgs::msg::String>("/doubao_chat_text_query", 10);
+
         // 麦克风 PCM 发布器：高带宽实时流，采用 BEST_EFFORT QoS 避免丢包阅塞
         rclcpp::QoS mic_qos(rclcpp::KeepLast(20));
         mic_qos.best_effort();
@@ -92,6 +95,10 @@ void ROSManager::publishWakeupDetail(const std::string& status_msg) {
 
 void ROSManager::publishVoiceWakeup(const std::string& msg) {
     publishMessage(voice_wakeup_publisher_, msg);
+}
+
+void ROSManager::publishDoubaoChatQuery(const std::string& msg) {
+    publishMessage(doubao_chat_query_publisher_, msg);
 }
 
 void ROSManager::publishMicPcm(const uint8_t* data, size_t len) {

@@ -368,6 +368,34 @@ class DialogSession:
             else:
                 await asyncio.sleep(0.1)
 
+    async def _chat_query_loop(self):
+        """轮询 /doubao_chat_text_query 队列，收到文本后通过 chat_text_query 发送给豆包大模型"""
+        print("[chat_query] _chat_query_loop 已启动")
+        while self.is_running:
+            if self._ros2_mic is None:
+                await asyncio.sleep(0.1)
+                continue
+            text = self._ros2_mic.get_chat_query_text()
+            if text:
+                try:
+                    print(f"[chat_query] 从队列取出文本: {text}")
+                    # 打断当前正在播放的 TTS 音频
+                    while not self.audio_queue.empty():
+                        try:
+                            self.audio_queue.get_nowait()
+                        except queue.Empty:
+                            break
+                    # 发布到 /chat_history 记录用户输入
+                    self._ros2_mic.publish_chat_history(text, speaker="PERSON")
+                    await self.client.chat_text_query(text)
+                    print(f"[chat_query] chat_text_query 发送完成: {text}")
+                except Exception as e:
+                    print(f"[chat_query] chat_text_query 发送失败: {e}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                await asyncio.sleep(0.1)
+
     def _keyboard_signal(self, sig, frame):
         print(f"receive keyboard Ctrl+C")
         self.stop()
@@ -543,6 +571,9 @@ class DialogSession:
 
             # 启动字幕文本轮询任务（/voiceprint/subtitle VAD 结束后发给豆包）
             self._pending_tasks.append(asyncio.create_task(self._subtitle_query_loop()))
+
+            # 启动对话查询轮询任务（/doubao_chat_text_query 收到文本后发给豆包）
+            self._pending_tasks.append(asyncio.create_task(self._chat_query_loop()))
 
             while self.is_recording:
                 try:

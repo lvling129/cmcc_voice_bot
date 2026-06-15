@@ -62,6 +62,9 @@ class Ros2MicSource:
         # 字幕文本队列（VAD 结束后的完整句子，线程安全）
         self._subtitle_queue: Queue = Queue()
 
+        # 对话查询队列（收到 /doubao_chat_text_query 后发给大模型）
+        self._chat_query_queue: Queue = Queue()
+
         self._node: Optional[Node] = None
         self._executor = None
         self._spin_thread: Optional[threading.Thread] = None
@@ -98,6 +101,10 @@ class Ros2MicSource:
         # 订阅 /voiceprint/subtitle 话题（用于接收 VAD 字幕文本）
         self._node.create_subscription(
             String, self.DEFAULT_SUBTITLE_TOPIC, self._on_subtitle, 10)
+
+        # 订阅 /doubao_chat_text_query 话题（收到文本后发给大模型对话）
+        self._node.create_subscription(
+            String, '/doubao_chat_text_query', self._on_chat_query, 10)
 
         # 发布 /chat_history 话题（用于发送 ASR 识别结果）
         chat_history_qos = QoSProfile(
@@ -176,6 +183,22 @@ class Ros2MicSource:
         """非阻塞获取一条 VAD 结束的字幕文本，无数据时返回 None"""
         try:
             return self._subtitle_queue.get_nowait()
+        except Empty:
+            return None
+
+    # -- 对话查询回调 ---------------------------------------------------------
+
+    def _on_chat_query(self, msg: String) -> None:
+        """收到 /doubao_chat_text_query 话题消息，将文本放入队列"""
+        text = msg.data.strip()
+        if text:
+            print(f"[ros2_mic_source] 收到 /doubao_chat_text_query: {text}")
+            self._chat_query_queue.put(text)
+
+    def get_chat_query_text(self) -> Optional[str]:
+        """非阻塞获取一条对话查询文本，无数据时返回 None"""
+        try:
+            return self._chat_query_queue.get_nowait()
         except Empty:
             return None
     

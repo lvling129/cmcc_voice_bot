@@ -375,6 +375,12 @@ void AvvtnCapture::handleAudioWake(avvtn_callback_data_t *data_p)
     std::string wake_str = std::string((char *)data_p->data, data_p->data_size);
     LOG_INFO("AVVTN接收到唤醒语音: %s", wake_str.c_str());
 
+    if (is_sleeping == false)
+    {
+        LOG_INFO("AVVTN已处于唤醒状态，不执行唤醒");
+        return;
+    }
+
     //aiui_wrapper_.ResetWakeup();
     is_sleeping = false;
 
@@ -403,8 +409,8 @@ void AvvtnCapture::handleAudioWake(avvtn_callback_data_t *data_p)
         // 发布唤醒事件到 /voice_wakeup 话题
         ROSManager::getInstance().publishVoiceWakeup(wake_str);
 
-        // 唤醒时播放唤醒音频
-        system("ffplay -autoexit -nodisp -ar 24000 -ac 1 -f f32le /home/nvidia/cmcc_voice_bot/bin/output.pcm > /dev/null 2>&1 &");
+        // 发布文本“灵犀灵犀”到 /doubao_chat_text_query，触发豆包大模型对话
+        ROSManager::getInstance().publishDoubaoChatQuery("灵犀灵犀");
 
         //aiui_wrapper_.Wakeup();
     }
