@@ -393,8 +393,6 @@ void AvvtnCapture::handleAudioWake(avvtn_callback_data_t *data_p)
     }
     if(msg_type == "wakeup_detail")
     {
-        // 通过ROS2发布带角度的唤醒信息给转向动作使用
-        ROSManager::getInstance().publishWakeupDetail(wake_str);
         LOG_INFO("带角度的语音唤醒不发送wakeup给AIUI");
         return;
     }
@@ -404,29 +402,9 @@ void AvvtnCapture::handleAudioWake(avvtn_callback_data_t *data_p)
     {
         // 发布唤醒事件到 /voice_wakeup 话题
         ROSManager::getInstance().publishVoiceWakeup(wake_str);
-        /*发送ROS2话题robot_avvtn_chat_history  问*/
-        nlohmann::json wake_up = {
-                {"speaker", "person"},
-                {"text", "灵犀灵犀"}
-        };
-        ROSManager::getInstance().publishChatHistory(wake_up.dump());
-        ROSManager::getInstance().publishChatHistoryNoStream(wake_up.dump());
 
-        // 唤醒直接播放唤醒音频，仅首次唤醒播放
-        static bool first_wakeup_audio_played = false;
-        if (!first_wakeup_audio_played) {
-            system("ffplay -autoexit -nodisp -ar 24000 -ac 1 -f f32le /home/nvidia/cmcc_voice_bot/bin/output.pcm > /dev/null 2>&1 &");
-            first_wakeup_audio_played = true;
-        }
-
-        /*发送ROS2话题robot_avvtn_chat_history  答*/
-        nlohmann::json answer = {
-            {"speaker", "robot"},
-            {"text", "你好"},
-            {"is_skill", "0"},
-            {"is_knowledge", "0"}
-        };
-        ROSManager::getInstance().publishChatHistoryNoStream(answer.dump());
+        // 唤醒时播放唤醒音频
+        system("ffplay -autoexit -nodisp -ar 24000 -ac 1 -f f32le /home/nvidia/cmcc_voice_bot/bin/output.pcm > /dev/null 2>&1 &");
 
         //aiui_wrapper_.Wakeup();
     }
