@@ -50,7 +50,12 @@ start_session_req = {
             "strict_audit": False,
             "audit_response": "抱歉，这个问题我暂时不能回答，请您去人工柜台。",
             "recv_timeout": 10,
-            "input_mod": "audio"
+            "input_mod": "audio",
+            "enable_volc_websearch": True,
+            "volc_websearch_type": "web_summary",
+            "volc_websearch_api_key": "BoVLg7qZgB0ivB24wpJTHZmD4hZHVHSE",
+            "enable_music": True,
+            "enable_loudness_norm": True
         }
     }
 }
