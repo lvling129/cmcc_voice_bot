@@ -251,6 +251,17 @@ class BusinessFlowNode(Node):
                             "params_json": json.dumps({"phone_number": content})
                         })))
 
+            elif business_type == "resend_verify_code":
+                # 重新发送验证码，使用已缓存的手机号
+                if self.current_state == BusinessState.S3_INPUT_CODE and self.phone_number:
+                    self.get_logger().info(f"重新发送验证码，手机号: {self.phone_number}")
+                    self.pub_api.publish(String(data=json.dumps({
+                        "func_name": "send_verify_code",
+                        "params_json": json.dumps({"phone_number": self.phone_number})
+                    })))
+                else:
+                    self.get_logger().warning(f"无法重发验证码: 状态={self.current_state}, 手机号={self.phone_number}")
+
             elif business_type == "sms_verify_code":
                 # 收到验证码，校验后发布到后端校验
                 if self.current_state == BusinessState.S3_INPUT_CODE:
@@ -401,9 +412,9 @@ class BusinessFlowNode(Node):
             self.get_logger().error(f"/api_response 处理异常: {e}")
 
     def _handle_send_verify_code_result(self, code, message, data_json):
-        """处理发送验证码结果"""
-        # 状态守卫：只有在 S1（等待验证码发送结果）时才处理
-        if self.current_state != BusinessState.S1_INPUT_PHONE:
+        """处理发送验证码结果（首次发送或重发均走此逻辑）"""
+        # 状态守卫：S1（首次发送）或 S3（重发）时均可处理
+        if self.current_state not in (BusinessState.S1_INPUT_PHONE, BusinessState.S3_INPUT_CODE):
             self.get_logger().warning(f"收到 send_verify_code 响应但当前状态为 {self.current_state}，忽略")
             return
         if code == 0:
