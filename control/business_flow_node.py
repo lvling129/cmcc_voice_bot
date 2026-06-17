@@ -164,8 +164,8 @@ class BusinessFlowNode(Node):
             ui_page = "traffic_result"
             tts_text = "已为您查询流量信息，请看屏幕"
             detail = json.dumps({
-                "phone_number": self.traffic_info.get("phone_number", ""),
-                "billCycle": self.traffic_info.get("billCycle", ""),
+                "phone_number": self.phone_number,
+                "billCycle": self.billCycle,
                 "data_json": self.traffic_info.get("data_json", [])
             }, ensure_ascii=False)
 
@@ -333,7 +333,7 @@ class BusinessFlowNode(Node):
                     if self.current_business == "query_traffic":
                         self.get_logger().info(f"收到查询年月: {content}，开始查询流量")
                         self.pub_api.publish(String(data=json.dumps({
-                            "func_name": "query_traffic",
+                            "func_name": "query_traffic_by_package",
                             "params_json": json.dumps({
                                 "phone_number": self.phone_number,
                                 "billCycle": content
@@ -381,7 +381,6 @@ class BusinessFlowNode(Node):
                 self.pending_business = ""
                 self.switch_state(BusinessState.S0_IDLE)
                 self.pub_sleep.publish(String(data="sleep"))
-                
 
         except json.JSONDecodeError as e:
             self.get_logger().error(f"/touch_topic JSON 解析失败: {e}")
@@ -443,7 +442,7 @@ class BusinessFlowNode(Node):
                 self._handle_query_balance_result(code, message, data_json)
             elif func_name == "query_package":
                 self._handle_query_package_result(code, message, data_json)
-            elif func_name == "query_traffic":
+            elif func_name == "query_traffic_by_package":
                 self._handle_query_traffic_result(code, message, data_json)
             else:
                 self.get_logger().warning(f"未知的 func_name: {func_name}")
@@ -542,9 +541,7 @@ class BusinessFlowNode(Node):
             return
         if code == 0:
             self.traffic_info = {
-                "phone_number": data_json.get("servnumber", ""),
-                "billCycle": data_json.get("billCycle", ""),
-                "data_json": data_json.get("resources", [])
+                "data_json": data_json.get("package_list", [])
             }
             self.get_logger().info(f"流量查询成功: {self.traffic_info}")
             self.switch_state(BusinessState.S11_TRAFFIC_RESULT)
