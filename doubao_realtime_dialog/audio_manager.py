@@ -103,6 +103,7 @@ class DialogSession:
         self.audio_queue = queue.Queue()
         self._tts_lock = asyncio.Lock()  # TTS 请求串行化锁
         self._pending_tasks: list = []  # 跟踪所有 asyncio task，用于 stop 时取消
+        self._last_reconnect_time = 0  # 上次重连时间戳，用于冷却期判断
         if not self.is_audio_file_input:
             self.audio_device = AudioDeviceManager(
                 AudioConfig(**config.input_audio_config),
@@ -426,6 +427,39 @@ class DialogSession:
         except Exception as e:
             print(f"[stop] 关闭 WebSocket 异常: {e}")
 
+    async def reconnect(self):
+        """自动重连：当服务端发送 event=N/A（会话过期）时，重新建立 WebSocket 连接和会话"""
+        print("[reconnect] 检测到会话过期，开始重连...")
+        try:
+            # 关闭旧连接（容错处理，避免 close 本身抛异常）
+            if self.client and self.client.ws:
+                try:
+                    await self.client.ws.close()
+                except Exception:
+                    pass
+                print("[reconnect] 旧连接已关闭")
+            # 重新建立连接和会话
+            await self.client.connect()
+            self._last_reconnect_time = time.time()
+            print("[reconnect] 重连成功，新会话已建立")
+            # 重置 TTS 会话状态，确保下次 TTS 使用 chat_text_query 激活
+            self._tts_session_initialized = False
+        except Exception as e:
+            print(f"[reconnect] 重连失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _is_idle_timeout(self, response: Dict[str, Any]) -> bool:
+        """判断是否为空闲超时错误（code=55000001 或 desc 含 IdleTimeout）"""
+        if response.get('code') == 55000001:
+            return True
+        payload_msg = response.get('payload_msg', {})
+        if isinstance(payload_msg, dict):
+            error_desc = payload_msg.get('error', '')
+            if 'IdleTimeout' in str(error_desc):
+                return True
+        return False
+
     async def receive_loop(self):
         try:
             while self.is_running:
@@ -434,8 +468,17 @@ class DialogSession:
                 if not response:
                     # 超时返回空 dict，继续等待
                     continue
-                print(f"[receive_loop] 收到响应: event={response.get('event', 'N/A')}")
+                print(f"[receive_loop] 收到响应: event={response.get('event', 'N/A')}, keys={list(response.keys())}")
                 self.handle_server_response(response)
+                # 检测会话过期：无 event 字段的响应（SERVER_ERROR idle timeout 或 SERVER_FULL_RESPONSE 过期通知）
+                if 'event' not in response and response:
+                    # 冷却期内（重连后 30s 内）忽略 idle timeout，避免无限重连循环
+                    if self._is_idle_timeout(response) and (time.time() - self._last_reconnect_time < 30):
+                        print(f"[receive_loop] 冷却期内忽略 idle timeout，等待音频恢复")
+                        continue
+                    print(f"[receive_loop] 检测到会话过期，触发重连, response={response}")
+                    await self.reconnect()
+                    continue
                 if 'event' in response and (response['event'] == 152 or response['event'] == 153):
                     print(f"receive session finished event: {response['event']}")
                     self.is_session_finished = True
