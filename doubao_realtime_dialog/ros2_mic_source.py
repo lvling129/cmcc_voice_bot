@@ -37,6 +37,7 @@ class Ros2MicSource:
     DEFAULT_CHAT_HISTORY_TOPIC = "/chat_history"
     DEFAULT_VOICE_TOPIC = "/voice_topic"
     DEFAULT_SUBTITLE_TOPIC = "/voiceprint/subtitle"
+    DEFAULT_SAUC_UTTERANCE_TOPIC = "/sauc_utterance"
     # 5 秒 16k S16LE 缓冲上限：16000 * 2 * 5 = 160000B
     DEFAULT_MAX_BUFFER_BYTES = 16000 * 2 * 5
 
@@ -64,6 +65,9 @@ class Ros2MicSource:
 
         # 对话查询队列（收到 /doubao_chat_text_query 后发给大模型）
         self._chat_query_queue: Queue = Queue()
+
+        # SAUC 多人对话队列（收到 /sauc_utterance 后解析 speaker+content 发给大模型）
+        self._sauc_queue: Queue = Queue()
 
         self._node: Optional[Node] = None
         self._executor = None
@@ -106,6 +110,16 @@ class Ros2MicSource:
         self._node.create_subscription(
             String, '/doubao_chat_text_query', self._on_chat_query, 10)
 
+        # 订阅 /sauc_utterance 话题（多人对话转写结果）
+        sauc_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=20,
+            durability=DurabilityPolicy.VOLATILE,
+        )
+        self._node.create_subscription(
+            String, self.DEFAULT_SAUC_UTTERANCE_TOPIC, self._on_sauc_utterance, sauc_qos)
+
         # 发布 /chat_history 话题（用于发送 ASR 识别结果）
         chat_history_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -126,7 +140,7 @@ class Ros2MicSource:
         self._spin_thread.start()
 
         self._node.get_logger().info(
-            f"ROS2 mic source 已启动，订阅 topic={self.topic}, tts_topic={self.tts_topic}, subtitle_topic={self.DEFAULT_SUBTITLE_TOPIC}")
+            f"ROS2 mic source 已启动，订阅 topic={self.topic}, tts_topic={self.tts_topic}, subtitle_topic={self.DEFAULT_SUBTITLE_TOPIC}, sauc_topic={self.DEFAULT_SAUC_UTTERANCE_TOPIC}")
 
     def stop(self) -> None:
         """停止节点和 spin 线程，唤醒任何阻塞的 read"""
@@ -240,6 +254,35 @@ class Ros2MicSource:
             self._node.get_logger().info(f"发布业务意图到 /voice_topic: {intent}")
         except Exception as e:
             self._node.get_logger().error(f"发布业务意图失败: {e}")
+
+    # -- SAUC 多人对话回调 -----------------------------------------------------
+
+    def _on_sauc_utterance(self, msg: String) -> None:
+        """收到 /sauc_utterance 话题消息，解析 speakers 并格式化后放入队列"""
+        try:
+            data = json.loads(msg.data)
+            speakers = data.get("speakers", [])
+            if not speakers:
+                return
+            lines = []
+            for spk in speakers:
+                spk_id = spk.get("speaker_id", "?")
+                content = spk.get("content", "").strip()
+                if content:
+                    lines.append(f"[spk{spk_id}]：{content}")
+            if lines:
+                formatted = "\n".join(lines)
+                print(f"[ros2_mic_source] 收到 /sauc_utterance: {formatted}")
+                self._sauc_queue.put(formatted)
+        except json.JSONDecodeError as e:
+            print(f"[ros2_mic_source] /sauc_utterance JSON 解析失败: {e}")
+
+    def get_sauc_text(self) -> Optional[str]:
+        """非阻塞获取一条 SAUC 多人对话文本，无数据时返回 None"""
+        try:
+            return self._sauc_queue.get_nowait()
+        except Empty:
+            return None
 
     # -- 数据回调 ------------------------------------------------------------
 
