@@ -97,6 +97,8 @@ class DialogSession:
         self.is_user_querying = False
         self.is_sending_chat_tts_text = False
         self.is_muting_tts = False  # TTS 静音标志位（JSON 意图周期内禁止播放）
+        self._tts_audio_started = False  # 当前轮次 TTS 音频是否已开始播放
+        self._tts_synthesis_done = False  # 服务端 TTS 合成是否已完成（event 359）
         self.audio_buffer = b''
         self.tts_text_buffer = ""  # 累积 TTS 文本
 
@@ -127,7 +129,11 @@ class DialogSession:
                 if audio_data is not None:
                     self.output_stream.write(audio_data)
             except queue.Empty:
-                # 队列为空时等待一小段时间
+                # 队列为空：如果 TTS 合成已完成且音频已开始播放，说明播放完毕
+                if self._tts_synthesis_done and self._tts_audio_started and self._ros2_mic:
+                    self._ros2_mic.publish_tts_status("stop")
+                    self._tts_audio_started = False
+                    self._tts_synthesis_done = False
                 time.sleep(0.1)
             except Exception as e:
                 print(f"音频播放错误: {e}")
@@ -150,6 +156,10 @@ class DialogSession:
             if self.is_muting_tts:
                 return
             audio_data = response['payload_msg']
+            # TTS 音频开始：第一个音频帧到达时发布 "start" 状态
+            if not self._tts_audio_started and self._ros2_mic:
+                self._tts_audio_started = True
+                self._ros2_mic.publish_tts_status("start")
             if not self.is_audio_file_input:
                 self.audio_queue.put(audio_data)
             self.audio_buffer += audio_data
@@ -168,6 +178,8 @@ class DialogSession:
                 self.is_user_querying = True
                 self.tts_text_buffer = ""  # 清空 TTS 文本缓存
                 self.is_muting_tts = False  # 重置 TTS 静音标志位
+                self._tts_audio_started = False  # 重置 TTS 音频开始标志
+                self._tts_synthesis_done = False  # 重置 TTS 合成完成标志
 
             # ASR 识别结果（流式，event 451）
             if event == 451:
@@ -225,6 +237,9 @@ class DialogSession:
             # TTS 结束（event 359），打印完整文本并发布到话题
             if event == 359:
                 print(f"[event 359] 收到 TTS 结束事件")
+                # 标记 TTS 合成已完成，由播放线程在队列清空后发布 "stop"
+                if self._tts_audio_started:
+                    self._tts_synthesis_done = True
                 if self.tts_text_buffer:
                     print(f"[TTS 完整回复]: {self.tts_text_buffer}")
                     # 检测是否为 JSON 意图格式

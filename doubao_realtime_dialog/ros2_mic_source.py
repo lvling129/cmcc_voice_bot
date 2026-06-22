@@ -80,6 +80,9 @@ class Ros2MicSource:
         # 业务意图发布器（/voice_topic）
         self._pub_voice_topic = None
 
+        # TTS 状态发布器（/tts_status）
+        self._pub_tts_status = None
+
     # -- 启动 / 停止 ---------------------------------------------------------
 
     def start(self) -> None:
@@ -133,6 +136,10 @@ class Ros2MicSource:
         # 发布 /voice_topic 话题（用于发送业务意图）
         self._pub_voice_topic = self._node.create_publisher(
             String, "/voice_topic", 10)
+
+        # 发布 /tts_status 话题（TTS 开始/结束状态）
+        self._pub_tts_status = self._node.create_publisher(
+            String, "/tts_status", 10)
 
         self._running = True
         self._spin_thread = threading.Thread(
@@ -254,6 +261,20 @@ class Ros2MicSource:
             self._node.get_logger().info(f"发布业务意图到 /voice_topic: {intent}")
         except Exception as e:
             self._node.get_logger().error(f"发布业务意图失败: {e}")
+
+    def publish_tts_status(self, status: str) -> None:
+        """发布 TTS 状态到 /tts_status 话题
+        
+        Args:
+            status: "start" 表示 TTS 开始，"stop" 表示 TTS 结束
+        """
+        if self._pub_tts_status is None or not self._node:
+            return
+        try:
+            self._pub_tts_status.publish(String(data=status))
+            self._node.get_logger().info(f"发布 TTS 状态: {status}")
+        except Exception as e:
+            self._node.get_logger().error(f"发布 TTS 状态失败: {e}")
 
     # -- SAUC 多人对话回调 -----------------------------------------------------
 

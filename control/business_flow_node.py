@@ -7,7 +7,6 @@ from std_msgs.msg import String
 class BusinessState:
     S0_IDLE           = "S0"   # 待机首页
     S1_INPUT_PHONE    = "S1"   # 手机号输入页
-    S2_WAIT_CODE      = "S2"   # 等待验证码
     S3_INPUT_CODE     = "S3"   # 验证码输入页
     S4_VERIFYING      = "S4"   # 验证中
     S5_BALANCE_RESULT  = "S5"   # 话费查询结果页
@@ -102,10 +101,6 @@ class BusinessFlowNode(Node):
         elif s == BusinessState.S1_INPUT_PHONE:
             ui_page = "phone_input"
             tts_text = "请在触屏上输入11位手机号码"
-
-        elif s == BusinessState.S2_WAIT_CODE:
-            ui_page = "smscode_input"
-            tts_text = "正在请求验证码，请稍候"
 
         elif s == BusinessState.S3_INPUT_CODE:
             ui_page = "smscode_input"
