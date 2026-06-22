@@ -651,6 +651,11 @@ class DialogSession:
             # 启动 SAUC 多人对话轮询任务（/sauc_utterance 收到文本后发给豆包）
             self._pending_tasks.append(asyncio.create_task(self._sauc_query_loop()))
 
+            # 检查是否将音频发送给大模型
+            send_to_llm = getattr(config, 'enable_mic_pcm_to_llm', True)
+            if not send_to_llm:
+                print("[豆包] enable_mic_pcm_to_llm=False，不发送音频给大模型")
+
             while self.is_recording:
                 try:
                     audio_data = await self._ros2_mic.read(chunk_size_bytes)
@@ -658,7 +663,9 @@ class DialogSession:
                         await asyncio.sleep(0.05)
                         continue
                     save_input_pcm_to_wav(audio_data, "input.pcm")
-                    await self.client.task_request(audio_data)
+                    # 根据开关决定是否发送给大模型
+                    if send_to_llm:
+                        await self.client.task_request(audio_data)
                 except Exception as e:
                     print(f"从 ROS2 读取 PCM 出错: {e}")
                     await asyncio.sleep(0.1)
