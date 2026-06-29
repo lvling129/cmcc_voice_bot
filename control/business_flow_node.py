@@ -16,6 +16,7 @@ class BusinessState:
     S9_PACKAGE_RESULT = "S9"   # 套餐查询结果页
     S10_CONFIRM_SWITCH = "S10" # 业务切换二次确认弹窗
     S11_TRAFFIC_RESULT = "S11" # 流量查询结果页
+    S12_NEW_SIM_CARD   = "S12" # 直接跳转新办卡H5页面
 
 # 通用业务流程节点（可扩展所有业务）
 class BusinessFlowNode(Node):
@@ -149,7 +150,8 @@ class BusinessFlowNode(Node):
             business_name_map = {
                 "query_balance": "查话费",
                 "query_package": "查套餐",
-                "query_traffic": "查流量"
+                "query_traffic": "查流量",
+                "new_sim_card": "新办卡"
             }
             current_name = business_name_map.get(self.current_business, "未知")
             tts_text = f"您当前正在{current_name}流程中，请问是放弃还是继续？"
@@ -163,6 +165,10 @@ class BusinessFlowNode(Node):
                 "billCycle": self.billCycle,
                 "data_json": self.traffic_info.get("data_json", [])
             }, ensure_ascii=False)
+
+        elif s == BusinessState.S12_NEW_SIM_CARD:
+            ui_page = "new_sim_card"
+            tts_text = "已为您打开新办卡页面，请看屏幕"
 
         # 执行
         if s in (BusinessState.S5_BALANCE_RESULT, BusinessState.S9_PACKAGE_RESULT, BusinessState.S10_CONFIRM_SWITCH, BusinessState.S11_TRAFFIC_RESULT):
@@ -186,8 +192,8 @@ class BusinessFlowNode(Node):
             self.get_logger().info(f"语音业务: business_type={business_type}, content={content}")
 
             if business_type == "query_balance":
-                # 查询余额，需要当前在 S0 或 S5 或 S9 或 S11 状态
-                if self.current_state in (BusinessState.S0_IDLE, BusinessState.S5_BALANCE_RESULT, BusinessState.S9_PACKAGE_RESULT, BusinessState.S11_TRAFFIC_RESULT):
+                # 查询余额，需要当前在 S0 或 S5 或 S9 或 S11 或 S12 状态
+                if self.current_state in (BusinessState.S0_IDLE, BusinessState.S5_BALANCE_RESULT, BusinessState.S9_PACKAGE_RESULT, BusinessState.S11_TRAFFIC_RESULT, BusinessState.S12_NEW_SIM_CARD):
                     self.current_business = "query_balance"
                     self.switch_state(BusinessState.S1_INPUT_PHONE)
                 elif self.current_business == "query_balance":
@@ -206,8 +212,8 @@ class BusinessFlowNode(Node):
                     self.switch_state(BusinessState.S10_CONFIRM_SWITCH)
 
             elif business_type == "query_package":
-                # 查询套餐，需要当前在 S0 或 S5 或 S9 或 S11 状态
-                if self.current_state in (BusinessState.S0_IDLE, BusinessState.S5_BALANCE_RESULT, BusinessState.S9_PACKAGE_RESULT, BusinessState.S11_TRAFFIC_RESULT):
+                # 查询套餐，需要当前在 S0 或 S5 或 S9 或 S11 或 S12 状态
+                if self.current_state in (BusinessState.S0_IDLE, BusinessState.S5_BALANCE_RESULT, BusinessState.S9_PACKAGE_RESULT, BusinessState.S11_TRAFFIC_RESULT, BusinessState.S12_NEW_SIM_CARD):
                     self.current_business = "query_package"
                     self.switch_state(BusinessState.S1_INPUT_PHONE)
                 elif self.current_business == "query_package":
@@ -226,8 +232,8 @@ class BusinessFlowNode(Node):
                     self.switch_state(BusinessState.S10_CONFIRM_SWITCH)
 
             elif business_type == "query_traffic":
-                # 查询流量，需要当前在 S0/S5/S9/S11 状态
-                if self.current_state in (BusinessState.S0_IDLE, BusinessState.S5_BALANCE_RESULT, BusinessState.S9_PACKAGE_RESULT, BusinessState.S11_TRAFFIC_RESULT):
+                # 查询流量，需要当前在 S0/S5/S9/S11/S12 状态
+                if self.current_state in (BusinessState.S0_IDLE, BusinessState.S5_BALANCE_RESULT, BusinessState.S9_PACKAGE_RESULT, BusinessState.S11_TRAFFIC_RESULT, BusinessState.S12_NEW_SIM_CARD):
                     self.current_business = "query_traffic"
                     self.switch_state(BusinessState.S1_INPUT_PHONE)
                 elif self.current_business == "query_traffic":
@@ -243,9 +249,24 @@ class BusinessFlowNode(Node):
                     self.switch_state(BusinessState.S10_CONFIRM_SWITCH)
 
             elif business_type == "new_sim_card":
-                # 暂未开放的业务，语音提示后不做任何操作
-                self.get_logger().info(f"业务 {business_type} 暂未开放")
-                self.pub_tts.publish(String(data="当前暂时不支持该业务哦，敬请期待"))
+                # 新办卡，直接跳转到新办卡页面（无需手机号/验证码）
+                if self.current_state in (BusinessState.S0_IDLE, BusinessState.S5_BALANCE_RESULT, BusinessState.S9_PACKAGE_RESULT, BusinessState.S11_TRAFFIC_RESULT, BusinessState.S12_NEW_SIM_CARD):
+                    self.current_business = "new_sim_card"
+                    self.switch_state(BusinessState.S12_NEW_SIM_CARD)
+                elif self.current_business == "new_sim_card":
+                    # 新业务与当前业务相同，不弹窗，TTS提示
+                    self.get_logger().info("用户请求的业务与当前业务相同，不弹窗")
+                    self.pub_tts.publish(String(data="您当前已经在新办卡流程中"))
+                elif self.current_state == BusinessState.S10_CONFIRM_SWITCH:
+                    # 已在弹窗状态，更新待切换业务即可，不重复弹窗
+                    self.pending_business = "new_sim_card"
+                    self.get_logger().info("已在弹窗状态，更新待切换业务为 new_sim_card")
+                else:
+                    # 不在首页，弹出二次确认弹窗
+                    self.pending_business = "new_sim_card"
+                    self.previous_state = self.current_state  # 保存弹窗前状态
+                    self.get_logger().warning(f"当前状态 {self.current_state} 无法直接办理新业务，弹出确认弹窗")
+                    self.switch_state(BusinessState.S10_CONFIRM_SWITCH)
 
             elif business_type == "phone_number":
                 # 收到手机号，校验格式

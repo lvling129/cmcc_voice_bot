@@ -31,8 +31,10 @@ start_session_req = {
     },
     "tts": {
         "speaker": "zh_female_vv_jupiter_bigtts",
-        # "speaker": "S_XXXXXX",  // 指定自定义的复刻音色,需要填下character_manifest
-        # "speaker": "ICL_zh_female_aojiaonvyou_tob" // 指定官方复刻音色，不需要填character_manifest
+        # "speaker": "zh_female_vv_jupiter_bigtts",  // 指定自定义的复刻音色,需要填下character_manifest
+        # "speaker": "zh_female_xiaohe_jupiter_bigtts" // 指定官方复刻音色，不需要填character_manifest
+        # "speaker": "zh_male_xiaotian_jupiter_bigtts" // 指定官方复刻音色，不需要填character_manifest
+        # "speaker": "zh_male_yunzhou_jupiter_bigtts" // 指定官方复刻音色，不需要填character_manifest
         "audio_config": {
             "channel": 1,
             "format": "pcm",
