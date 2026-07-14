@@ -460,6 +460,8 @@ class BusinessFlowNode(Node):
                 self._handle_query_package_result(code, message, data_json)
             elif func_name == "query_traffic_by_package":
                 self._handle_query_traffic_result(code, message, data_json)
+            elif func_name == "script_active_query":
+                self._handle_script_query_result(code, message, data_json)
             else:
                 self.get_logger().warning(f"未知的 func_name: {func_name}")
 
@@ -523,6 +525,8 @@ class BusinessFlowNode(Node):
             self.account_expire_date = data_json.get("account_expire_date", "")
             self.get_logger().info(f"话费查询成功: 余额 {self.balance} 元，账户有效期 {self.account_expire_date}")
             self.switch_state(BusinessState.S5_BALANCE_RESULT)
+            # 异步触发营销推荐查询
+            self._trigger_script_query()
         else:
             self.get_logger().error(f"话费查询失败: {message}")
             self.pub_tts.publish(String(data="话费查询失败"))
@@ -543,6 +547,8 @@ class BusinessFlowNode(Node):
             }
             self.get_logger().info(f"套餐查询成功: {self.package_info}")
             self.switch_state(BusinessState.S9_PACKAGE_RESULT)
+            # 异步触发营销推荐查询
+            self._trigger_script_query()
         else:
             self.get_logger().error(f"套餐查询失败: {message}")
             self.pub_tts.publish(String(data="套餐查询失败"))
@@ -561,11 +567,38 @@ class BusinessFlowNode(Node):
             }
             self.get_logger().info(f"流量查询成功: {self.traffic_info}")
             self.switch_state(BusinessState.S11_TRAFFIC_RESULT)
+            # 异步触发营销推荐查询
+            self._trigger_script_query()
         else:
             self.get_logger().error(f"流量查询失败: {message}")
             self.pub_tts.publish(String(data="流量查询失败"))
             self.switch_state(BusinessState.S6_RESULT_FAIL)
             self._state_timer = self.create_timer(2.0, lambda: self.switch_state(BusinessState.S0_IDLE))
+
+    # ---------- 营销推荐查询 ----------
+    def _trigger_script_query(self):
+        """业务查询结果已发布，异步触发营销推荐查询"""
+        self.get_logger().info(f"触发营销推荐查询，手机号: {self.phone_number}")
+        self.pub_api.publish(String(data=json.dumps({
+            "func_name": "script_active_query",
+            "params_json": json.dumps({
+                "userInfo": {"msisdn": self.phone_number},
+                "qryInfo": {"pageInfo": {"busiClssID": "0", "pageNum": 1, "pageSize": 3}}
+            })
+        })))
+
+    def _handle_script_query_result(self, code, message, data_json):
+        """处理营销推荐查询结果，单独通过 page_switch 发布"""
+        if code == 0 and data_json.get("activity_list"):
+            activity_list_json = json.dumps(data_json, ensure_ascii=False)
+            script_page_data = json.dumps({
+                "page": "script_active_query_result",
+                "detail": activity_list_json
+            }, ensure_ascii=False)
+            self.get_logger().info(f"发布营销推荐结果: {script_page_data}")
+            self.pub_ui.publish(String(data=script_page_data))
+        else:
+            self.get_logger().warning(f"营销推荐查询无有效数据: code={code}, message={message}")
 
 def main(args=None):
     rclpy.init(args=args)
