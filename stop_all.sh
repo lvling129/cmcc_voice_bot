@@ -6,7 +6,7 @@
 
 set -u
 
-PROJECT_DIR="/home/nvidia/cmcc_voice_bot"
+PROJECT_DIR="/home/jetson/cmcc_voice_bot"
 PID_DIR="/tmp/cmcc_voice_bot_pids"
 
 GREEN='\033[0;32m'

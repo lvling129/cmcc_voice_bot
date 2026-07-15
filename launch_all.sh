@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-PROJECT_DIR="/home/nvidia/cmcc_voice_bot"
+PROJECT_DIR="/home/jetson/cmcc_voice_bot"
 PID_DIR="/tmp/cmcc_voice_bot_pids"
 mkdir -p "${PID_DIR}"
 
