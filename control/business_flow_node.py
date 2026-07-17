@@ -349,6 +349,19 @@ class BusinessFlowNode(Node):
                         })))
                         self.switch_state(BusinessState.S4_VERIFYING)
 
+            elif business_type == "change_phone_num":
+                # 更换手机号：在验证码输入页面，清空已有数据，重新进入手机号输入页
+                if self.current_state == BusinessState.S3_INPUT_CODE:
+                    self.get_logger().info(f"更换手机号，清空数据，业务类型保持: {self.current_business}")
+                    # 清空手机号、验证码及错误计数
+                    self.phone_number = ""
+                    self.sms_verify_code = ""
+                    self.phone_error_count = 0
+                    self.verify_code_error_count = 0
+                    self.switch_state(BusinessState.S1_INPUT_PHONE)
+                else:
+                    self.get_logger().warning(f"更换手机号仅在验证码输入页有效，当前状态: {self.current_state}")
+
             elif business_type == "bill_cycle":
                 # 收到年月输入（查套餐/查流量流程）
                 if content and self.current_state == BusinessState.S8_INPUT_MONTH:
