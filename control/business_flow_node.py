@@ -44,6 +44,7 @@ class BusinessFlowNode(Node):
         # 话费查询结果缓存
         self.balance = 0
         self.account_expire_date = ""
+        self.realamount = "0"  # 当月实际消费金额
 
         # 套餐查询缓存
         self.billCycle = ""  # 用户输入的年月，如 "202606"
@@ -118,7 +119,8 @@ class BusinessFlowNode(Node):
             detail = json.dumps({
                 "phone_number": self.phone_number,
                 "balance": self.balance,
-                "account_expire_date": self.account_expire_date
+                "account_expire_date": self.account_expire_date,
+                "realamount": self.realamount
             }, ensure_ascii=False)
 
         elif s == BusinessState.S6_RESULT_FAIL:
@@ -141,7 +143,11 @@ class BusinessFlowNode(Node):
             detail = json.dumps({
                 "phone_number": self.package_info.get("phone_number", ""),
                 "billCycle": self.package_info.get("billCycle", ""),
-                "data_json": self.package_info.get("data_json", [])
+                "data_json": self.package_info.get("data_json", []),
+                "flow_summary": self.package_info.get("flow_summary", {}),
+                "voice_summary": self.package_info.get("voice_summary", {}),
+                "msg_summary": self.package_info.get("msg_summary", {}),
+                "other_summary": self.package_info.get("other_summary", {})
             }, ensure_ascii=False)
 
         elif s == BusinessState.S10_CONFIRM_SWITCH:
@@ -163,7 +169,8 @@ class BusinessFlowNode(Node):
             detail = json.dumps({
                 "phone_number": self.phone_number,
                 "billCycle": self.billCycle,
-                "data_json": self.traffic_info.get("data_json", [])
+                "data_json": self.traffic_info.get("data_json", []),
+                "flow_summary": self.traffic_info.get("flow_summary", {})
             }, ensure_ascii=False)
 
         elif s == BusinessState.S12_NEW_SIM_CARD:
@@ -523,7 +530,8 @@ class BusinessFlowNode(Node):
         if code == 0:
             self.balance = data_json.get("balance", 0)
             self.account_expire_date = data_json.get("account_expire_date", "")
-            self.get_logger().info(f"话费查询成功: 余额 {self.balance} 元，账户有效期 {self.account_expire_date}")
+            self.realamount = data_json.get("realamount", "0") 
+            self.get_logger().info(f"话费查询成功: 余额 {self.balance} 元，账户有效期 {self.account_expire_date}，本月消费 {self.realamount} 元")
             self.switch_state(BusinessState.S5_BALANCE_RESULT)
             # 异步触发营销推荐查询
             self._trigger_script_query()
@@ -543,7 +551,11 @@ class BusinessFlowNode(Node):
             self.package_info = {
                 "phone_number": data_json.get("servnumber", ""),
                 "billCycle": data_json.get("billCycle", ""),
-                "data_json": data_json.get("resources", [])
+                "data_json": data_json.get("resources", []),
+                "flow_summary": data_json.get("flow_summary", {}),
+                "voice_summary": data_json.get("voice_summary", {}),
+                "msg_summary": data_json.get("msg_summary", {}),
+                "other_summary": data_json.get("other_summary", {})
             }
             self.get_logger().info(f"套餐查询成功: {self.package_info}")
             self.switch_state(BusinessState.S9_PACKAGE_RESULT)
@@ -563,7 +575,8 @@ class BusinessFlowNode(Node):
             return
         if code == 0:
             self.traffic_info = {
-                "data_json": data_json.get("package_list", [])
+                "data_json": data_json.get("package_list", []),
+                "flow_summary": data_json.get("flow_summary", {})
             }
             self.get_logger().info(f"流量查询成功: {self.traffic_info}")
             self.switch_state(BusinessState.S11_TRAFFIC_RESULT)
