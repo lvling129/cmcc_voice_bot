@@ -6,7 +6,7 @@ APP_DIR="/home/jetson/cmcc_voice_bot/bin"
 PROGRAM_NAME="robot_avvtn"
 PROGRAM_PATH="${APP_DIR}/${PROGRAM_NAME}"
 PID_FILE="${APP_DIR}/${PROGRAM_NAME}.pid"
-LOG_DIR="/var/log/robot_avvtn"
+LOG_DIR="/home/jetson/cmcc_voice_bot/log"
 LOG_FILE="${LOG_DIR}/robot_$(date +%Y%m%d).log"
 
 prepare_env() {

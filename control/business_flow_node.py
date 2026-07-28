@@ -38,6 +38,7 @@ class BusinessFlowNode(Node):
 
         # 语音业务缓存数据
         self.phone_number = ""
+        self.phone_verified = False  # 手机号是否已验证通过（后续业务可跳过输入）
         self.sms_verify_code = ""
         self.current_business = ""  # 当前业务类型：query_balance / query_package
         
@@ -201,8 +202,7 @@ class BusinessFlowNode(Node):
             if business_type == "query_balance":
                 # 查询余额，需要当前在 S0 或 S5 或 S9 或 S11 或 S12 状态
                 if self.current_state in (BusinessState.S0_IDLE, BusinessState.S5_BALANCE_RESULT, BusinessState.S9_PACKAGE_RESULT, BusinessState.S11_TRAFFIC_RESULT, BusinessState.S12_NEW_SIM_CARD):
-                    self.current_business = "query_balance"
-                    self.switch_state(BusinessState.S1_INPUT_PHONE)
+                    self._start_business_flow("query_balance")
                 elif self.current_business == "query_balance":
                     # 新业务与当前业务相同，不弹窗，TTS提示
                     self.get_logger().info("用户请求的业务与当前业务相同，不弹窗")
@@ -221,8 +221,7 @@ class BusinessFlowNode(Node):
             elif business_type == "query_package":
                 # 查询套餐，需要当前在 S0 或 S5 或 S9 或 S11 或 S12 状态
                 if self.current_state in (BusinessState.S0_IDLE, BusinessState.S5_BALANCE_RESULT, BusinessState.S9_PACKAGE_RESULT, BusinessState.S11_TRAFFIC_RESULT, BusinessState.S12_NEW_SIM_CARD):
-                    self.current_business = "query_package"
-                    self.switch_state(BusinessState.S1_INPUT_PHONE)
+                    self._start_business_flow("query_package")
                 elif self.current_business == "query_package":
                     # 新业务与当前业务相同，不弹窗，TTS提示
                     self.get_logger().info("用户请求的业务与当前业务相同，不弹窗")
@@ -241,8 +240,7 @@ class BusinessFlowNode(Node):
             elif business_type == "query_traffic":
                 # 查询流量，需要当前在 S0/S5/S9/S11/S12 状态
                 if self.current_state in (BusinessState.S0_IDLE, BusinessState.S5_BALANCE_RESULT, BusinessState.S9_PACKAGE_RESULT, BusinessState.S11_TRAFFIC_RESULT, BusinessState.S12_NEW_SIM_CARD):
-                    self.current_business = "query_traffic"
-                    self.switch_state(BusinessState.S1_INPUT_PHONE)
+                    self._start_business_flow("query_traffic")
                 elif self.current_business == "query_traffic":
                     self.get_logger().info("用户请求的业务与当前业务相同，不弹窗")
                     self.pub_tts.publish(String(data="您当前已经在查流量流程中"))
@@ -298,6 +296,7 @@ class BusinessFlowNode(Node):
                         # 校验通过，重置错误计数
                         self.phone_error_count = 0
                         self.phone_number = content
+                        self.phone_verified = True  # 标记手机号已验证
                         self.get_logger().info(f"手机号校验通过: {content}")
                         # 发布请求发送验证码（保持 S1，等 API 返回后再切到 S3，避免重复发布 smscode_input）
                         self.pub_api.publish(String(data=json.dumps({
@@ -315,6 +314,15 @@ class BusinessFlowNode(Node):
                     })))
                 else:
                     self.get_logger().warning(f"无法重发验证码: 状态={self.current_state}, 手机号={self.phone_number}")
+
+            elif business_type == "change_phone_num":
+                # 更换号码：清除缓存手机号，返回手机号输入页
+                self.get_logger().info("用户点击更换号码")
+                self.phone_number = ""
+                self.phone_verified = False
+                self.phone_error_count = 0
+                self.verify_code_error_count = 0
+                self.switch_state(BusinessState.S1_INPUT_PHONE)
 
             elif business_type == "sms_verify_code":
                 # 收到验证码，校验后发布到后端校验
@@ -411,10 +419,12 @@ class BusinessFlowNode(Node):
                     return
                 # 统一播放提示音
                 self.pub_tts.publish(String(data="有需要再来找我哦"))
-                # 重置错误计数和待切换业务
+                # 重置错误计数、待切换业务和手机号缓存
                 self.phone_error_count = 0
                 self.verify_code_error_count = 0
                 self.pending_business = ""
+                self.phone_number = ""
+                self.phone_verified = False
                 self.switch_state(BusinessState.S0_IDLE)
                 self.pub_sleep.publish(String(data="sleep"))
 
@@ -422,6 +432,21 @@ class BusinessFlowNode(Node):
             self.get_logger().error(f"/touch_topic JSON 解析失败: {e}")
         except Exception as e:
             self.get_logger().error(f"/touch_topic 处理异常: {e}")
+
+    def _start_business_flow(self, business_type: str):
+        """启动业务流程：有缓存手机号则跳过输入直接发验证码，否则进入手机号输入页"""
+        self.current_business = business_type
+        if self.phone_verified and self.phone_number:
+            # 已有验证过的手机号，跳过输入，直接发送验证码
+            self.get_logger().info(f"已有缓存手机号 {self.phone_number}，跳过输入直接发送验证码")
+            self.pub_tts.publish(String(data=f"使用号码{self.phone_number}，正在发送验证码"))
+            self.pub_api.publish(String(data=json.dumps({
+                "func_name": "send_verify_code",
+                "params_json": json.dumps({"phone_number": self.phone_number})
+            })))
+            self.switch_state(BusinessState.S3_INPUT_CODE)
+        else:
+            self.switch_state(BusinessState.S1_INPUT_PHONE)
 
     def _validate_phone_number(self, phone: str) -> bool:
         """校验手机号格式：11位，1开头，第二位3-9"""
@@ -448,9 +473,9 @@ class BusinessFlowNode(Node):
         self.phone_error_count = 0
         self.verify_code_error_count = 0
         # 切换到新业务
-        self.current_business = self.pending_business
+        new_business = self.pending_business
         self.pending_business = ""
-        self.switch_state(BusinessState.S1_INPUT_PHONE)
+        self._start_business_flow(new_business)
 
     def on_api_response(self, msg):
         """统一接收 API 调用返回结果"""

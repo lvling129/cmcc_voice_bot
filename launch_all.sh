@@ -56,7 +56,7 @@ log "robot_avvtn 已启动"
 # ---------- 3. 启动业务流程节点 ----------
 log "启动 business_flow_node..."
 /usr/bin/python3.10 "${PROJECT_DIR}/control/business_flow_node.py" \
-    >> /var/log/robot_avvtn/business_flow.log 2>&1 &
+    >> ${PROJECT_DIR}/log/business_flow.log 2>&1 &
 echo $! > "${PID_DIR}/business_flow.pid"
 log "business_flow_node 已启动 (PID: $!)"
 
@@ -64,7 +64,7 @@ log "business_flow_node 已启动 (PID: $!)"
 log "启动 doubao_realtime_dialog..."
 cd "${PROJECT_DIR}/doubao_realtime_dialog"
 /usr/bin/python3.10 main.py --mic-source=ros2 \
-    >> /var/log/robot_avvtn/doubao_dialog.log 2>&1 &
+    >> ${PROJECT_DIR}/log/doubao_dialog.log 2>&1 &
 echo $! > "${PID_DIR}/doubao_dialog.pid"
 log "doubao_realtime_dialog 已启动 (PID: $!)"
 
@@ -75,6 +75,6 @@ log "  所有服务已启动！"
 log "  AVVTN:          运行中 (见 bin/stop.sh)"
 log "  business_flow:  PID $(cat ${PID_DIR}/business_flow.pid)"
 log "  doubao_dialog:  PID $(cat ${PID_DIR}/doubao_dialog.pid)"
-log "  日志目录:       /var/log/robot_avvtn/"
+log "  日志目录:       ${PROJECT_DIR}/log/"
 log "  停止所有服务:   ./stop_all.sh"
 log "========================================="
