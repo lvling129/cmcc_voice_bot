@@ -126,7 +126,7 @@ class BusinessFlowNode(Node):
 
         elif s == BusinessState.S6_RESULT_FAIL:
             ui_page = "smscode_input"
-            tts_text = "验证失败，请重新输入验证码"
+            tts_text = ""  # TTS 由具体失败逻辑单独发布，此处不重复播报
 
         elif s == BusinessState.S7_GENERAL_FAIL:
             ui_page = "error"
@@ -557,7 +557,7 @@ class BusinessFlowNode(Node):
             self.get_logger().error(f"验证码校验失败: {message}")
             self.pub_tts.publish(String(data="验证码校验失败"))
             self.switch_state(BusinessState.S6_RESULT_FAIL)
-            self._state_timer = self.create_timer(2.0, lambda: self.switch_state(BusinessState.S3_INPUT_CODE))
+            self._state_timer = self.create_timer(5.0, lambda: self.switch_state(BusinessState.S3_INPUT_CODE))
 
     def _handle_query_balance_result(self, code, message, data_json):
         """处理话费查询结果"""
@@ -575,9 +575,12 @@ class BusinessFlowNode(Node):
             self._trigger_script_query()
         else:
             self.get_logger().error(f"话费查询失败: {message}")
-            self.pub_tts.publish(String(data="话费查询失败"))
+            if code == 2001:
+                self.pub_tts.publish(String(data="网络超时，请稍后再试"))
+            else:
+                self.pub_tts.publish(String(data="话费查询失败，请重新输入验证码"))
             self.switch_state(BusinessState.S6_RESULT_FAIL)
-            self._state_timer = self.create_timer(2.0, lambda: self.switch_state(BusinessState.S0_IDLE))
+            self._state_timer = self.create_timer(5.0, lambda: self.switch_state(BusinessState.S3_INPUT_CODE))
 
     def _handle_query_package_result(self, code, message, data_json):
         """处理套餐查询结果"""
@@ -601,9 +604,12 @@ class BusinessFlowNode(Node):
             self._trigger_script_query()
         else:
             self.get_logger().error(f"套餐查询失败: {message}")
-            self.pub_tts.publish(String(data="套餐查询失败"))
+            if code == 2001:
+                self.pub_tts.publish(String(data="网络超时，请稍后再试"))
+            else:
+                self.pub_tts.publish(String(data="套餐查询失败，请重新输入验证码"))
             self.switch_state(BusinessState.S6_RESULT_FAIL)
-            self._state_timer = self.create_timer(2.0, lambda: self.switch_state(BusinessState.S0_IDLE))
+            self._state_timer = self.create_timer(5.0, lambda: self.switch_state(BusinessState.S3_INPUT_CODE))
 
     def _handle_query_traffic_result(self, code, message, data_json):
         """处理流量查询结果"""
@@ -622,9 +628,12 @@ class BusinessFlowNode(Node):
             self._trigger_script_query()
         else:
             self.get_logger().error(f"流量查询失败: {message}")
-            self.pub_tts.publish(String(data="流量查询失败"))
+            if code == 2001:
+                self.pub_tts.publish(String(data="网络超时，请稍后再试"))
+            else:
+                self.pub_tts.publish(String(data="流量查询失败，请重新输入验证码"))
             self.switch_state(BusinessState.S6_RESULT_FAIL)
-            self._state_timer = self.create_timer(2.0, lambda: self.switch_state(BusinessState.S0_IDLE))
+            self._state_timer = self.create_timer(5.0, lambda: self.switch_state(BusinessState.S3_INPUT_CODE))
 
     # ---------- 营销推荐查询 ----------
     def _trigger_script_query(self):
